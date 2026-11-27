@@ -80,7 +80,7 @@ The F suite recorded 18 Claude observations and exited 1. The two in-flight scen
 
 E's P3 startup control held the adapter before `task.started`. The hub token proved live and search returned the selected tool. The first high-risk inner call matched an `alwaysAsk` rule and yielded the SDK verdict `tool_authorization_unavailable` with reason `tool approval is unavailable during runtime startup`. The hub returned `MCP tool call is not authorized.` The invocation produced zero target calls and emitted no approval request. Pi's early mixed search exercised the live token before `task.started`, and its approval-denied call came later in the turn.
 
-## 0.46 Pi retest
+## Pi upgrade retests
 
 ### Pi 1.6.0
 
@@ -92,9 +92,19 @@ After replacing the Pi row with 1.6.0 and rebuilding the same SDK revision with 
 
 `qualified-launch` used the production table and the Node distribution helper directly. The ordinary Attempt was claimed, started and completed with seven model tool attempts and four target writes (two to alpha, one to beta and one to the direct server). The rejected approval produced zero writes and the unselected server never started. Matching `tool_use` events carried the inner identity and hub results kept the outer identity. The Attempt token was revoked and no fixture processes remained.
 
-## Pi 1.6.1 retest
+### Pi 1.6.1
 
-On 2026-11-27, SDK `dea4d07c63294adbc3ff7d4aab3c217857029a3e` ran the strict `*` suite on macOS 26.5 arm64 with Node 24.22.1, Bun 1.4.4 and the loopback sandbox above. All 19 receipts recorded `acceptance.status: pass` with Pi 1.6.1. `qualified-launch` passed through the production table and Node distribution helper with seven attempts and four writes. The 256-server discovery case passed, with seven inner children at peak. No fixture process remained after any scenario. The production row applies to ordinary SDK-built Pi offers with search-exposed MCP toolsets and permits attribution of verified inner calls. [Upgrade issue](https://github.com/Ancienttwo/byok-sdk/issues/2522)
+On 2026-11-27, the strict `*` suite ran on macOS 26.5 arm64 with Node 24.22.1, Bun 1.4.4 and the loopback sandbox above. All 19 receipts recorded `acceptance.status: pass` with Pi 1.6.1. `qualified-launch` passed through the production table and Node distribution helper with seven attempts and four writes. The 256-server discovery case passed, with seven inner children at peak. No fixture process remained after any scenario. The production row applies to ordinary SDK-built Pi offers with search-exposed MCP toolsets and permits attribution of verified inner calls. [Upgrade issue](https://github.com/Ancienttwo/byok-sdk/issues/2522)
+
+The receipts record the local test revision `dea4d07c63294adbc3ff7d4aab3c217857029a3e`. Its tree differs from the [pushed implementation commit](https://github.com/Ancienttwo/byok-sdk/commit/6b69400e457f8bc367cd2eba8cd75f95706557f5) only in these documentation and test files. The review follow-up updates documentation and source comments.
+
+- `docs/adapter-capabilities.md`
+- `docs/researches/2026-11-19-mcp-search-runtime-qualification.md`
+- `docs/researches/pi-1.6.1-upgrade.md`
+- `examples/basic/README.md`
+- `packages/client/src/__tests__/pi-input-preparation.test.ts`
+- `packages/keys/src/model-route.test.ts`
+- `scripts/release/pack-and-smoke.test.mjs`
 
 ## Original F qualification results
 
