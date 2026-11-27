@@ -30,6 +30,7 @@ import type {
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { WakeConsumer } from './wakes/types.js';
 import type { RateLimiterOptions } from './rate-limiter.js';
+import type { HostMcpTaskContextOptions } from './task-assertion.js';
 
 /** One input image in the trusted embedder's process. */
 export interface UploadInputImage {
@@ -138,6 +139,16 @@ export interface CreateByokServerOptions {
       readonly reasonCode?: string;
     }>;
   };
+  /**
+   * Opt-in switch for the task-scoped host MCP tool-authority lane
+   * (`byok-task-assertion-v1`, spec §8). Off by default: `host-mcp-task-context`
+   * is withheld from the capability declaration and `verifyHostMcpTaskAssertion`
+   * fails closed. When `{ enabled: true }` is set, `host-mcp-task-context` is
+   * derived inside `capabilityDeclarationForPorts` and task assertions verify
+   * against this server's device directory, replay authority, active executions,
+   * and frozen offers.
+   */
+  hostMcpTaskContext?: HostMcpTaskContextOptions;
 }
 
 /** Fields shared by every {@link DispatchInput} variant. */

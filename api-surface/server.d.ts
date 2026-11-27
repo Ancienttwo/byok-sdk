@@ -12,15 +12,20 @@
 //   AgentHomeProjectionStatusReadback -> dist/types.d.ts
 //   AgentMessageDraftEvent -> dist/types.d.ts
 //   AgentResumeDispatchInput -> dist/types.d.ts
+//   AuthenticatedTaskAssertion -> @byok-sdk/core#AuthenticatedTaskAssertion
 //   ByokServer -> dist/index.d.ts
 //   ByokServerEvent -> dist/types.d.ts
 //   ByokServerStorage -> dist/types.d.ts
 //   CreateByokServerOptions -> dist/types.d.ts
 //   CreatePairingCodeInput -> dist/index.d.ts
 //   DEFAULT_TASK_PAGE_LIMIT -> dist/index.d.ts
+//   DeviceAssertionReplayAuthority -> @byok-sdk/core#DeviceAssertionReplayAuthority
 //   DeviceRecord -> @byok-sdk/cloud#DeviceRecord
 //   DispatchInput -> dist/types.d.ts
 //   DueWake -> dist/wakes/types.d.ts
+//   HostMcpTaskAssertionError -> dist/task-assertion.d.ts
+//   HostMcpTaskAssertionErrorCode -> dist/task-assertion.d.ts
+//   HostMcpTaskContextOptions -> dist/task-assertion.d.ts
 //   HubStats -> dist/types.d.ts
 //   InboundRefusalReason -> @byok-sdk/cloud#InboundRefusalReason
 //   InputImageUploadError -> dist/input-images.d.ts
@@ -51,6 +56,7 @@
 //   TenantId -> @byok-sdk/cloud#TenantId
 //   TokenSigner -> @byok-sdk/cloud#TokenSigner
 //   UploadInputImage -> dist/types.d.ts
+//   VerifyHostMcpTaskAssertionInput -> dist/task-assertion.d.ts
 //   WAKE_MAX_FUTURE_MS -> dist/wakes/types.d.ts
 //   WakeClosedError -> dist/wakes/types.d.ts
 //   WakeConflictError -> dist/wakes/types.d.ts
@@ -65,6 +71,7 @@
 //   createHmacTokenSigner -> @byok-sdk/cloud#createHmacTokenSigner
 //   inspectSqliteStore -> dist/store-compatibility.d.ts
 //   listenLoopback -> dist/loopback.d.ts
+//   verifyHostMcpTaskAssertion -> dist/task-assertion.d.ts
 // entry @byok-sdk/server/execution-core
 //   AgentMessageInput -> dist/execution-core/core.d.ts
 //   AgentRoutineDefinition -> dist/execution-core/model.d.ts
@@ -942,6 +949,9 @@ import { Hono } from 'hono';
 import { type ActivityReadOptions, type ActivityTail, type ApprovalTimelineTail, type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type EnqueuedAgentControl, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type InputImageBlobRef, type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
 export { InputImageUploadError } from './input-images.js';
+export { HostMcpTaskAssertionError, verifyHostMcpTaskAssertion } from './task-assertion.js';
+export type { HostMcpTaskAssertionErrorCode, HostMcpTaskContextOptions, VerifyHostMcpTaskAssertionInput, } from './task-assertion.js';
+export type { AuthenticatedTaskAssertion, DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, SteerRefusal, TaskEventEntry, TaskHandle, TaskSnapshot, UploadInputImage } from './types.js';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, SteerRefusal, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, UploadInputImage, } from './types.js';
 export { TaskEventsUnavailableError } from './types.js';
@@ -1099,6 +1109,28 @@ export declare class SqliteOwnershipError extends Error {
 // ==== @byok-sdk/server dist/store-compatibility.d.ts ====
 import type { StoreCompatibility } from '@byok-sdk/core';
 export declare function inspectSqliteStore(path: string): Promise<StoreCompatibility>;
+// ==== @byok-sdk/server dist/task-assertion.d.ts ====
+import { type AuthenticatedTaskAssertion, type DeviceAssertionReplayAuthority } from '@byok-sdk/core';
+import { type ToolsetId } from '@byok-sdk/protocol';
+import type { ByokServer } from './index.js';
+export interface HostMcpTaskContextOptions {
+    readonly enabled: true;
+    readonly replay?: DeviceAssertionReplayAuthority;
+}
+export interface VerifyHostMcpTaskAssertionInput {
+    readonly assertion: unknown;
+    readonly issuer: string;
+    readonly audience: string;
+    readonly toolset: ToolsetId;
+}
+export type HostMcpTaskAssertionErrorCode = 'task_context_disabled' | 'assertion_missing' | 'assertion_invalid' | 'assertion_audience_mismatch' | 'assertion_predates_server' | 'assertion_replayed' | 'replay_store_unavailable' | 'task_inactive' | 'toolset_not_offered';
+export declare class HostMcpTaskAssertionError extends Error {
+    readonly code: HostMcpTaskAssertionErrorCode;
+    constructor(code: HostMcpTaskAssertionErrorCode, message: string, options?: {
+        readonly cause?: unknown;
+    });
+}
+export declare function verifyHostMcpTaskAssertion(server: ByokServer, input: VerifyHostMcpTaskAssertionInput): Promise<AuthenticatedTaskAssertion>;
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
 import { type SteerRejectionCode } from '@byok-sdk/cloud';
 import type { ClaimedExecutor, TaskState } from '@byok-sdk/protocol';
@@ -1115,6 +1147,7 @@ import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProj
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { WakeConsumer } from './wakes/types.js';
 import type { RateLimiterOptions } from './rate-limiter.js';
+import type { HostMcpTaskContextOptions } from './task-assertion.js';
 export interface UploadInputImage {
     readonly bytes: Uint8Array;
     readonly contentType: InputImageBlobRef['mediaType'];
@@ -1153,6 +1186,7 @@ export interface CreateByokServerOptions {
             readonly reasonCode?: string;
         }>;
     };
+    hostMcpTaskContext?: HostMcpTaskContextOptions;
 }
 // support
 interface DispatchInputBase {
