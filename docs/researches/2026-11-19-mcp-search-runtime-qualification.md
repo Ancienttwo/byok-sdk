@@ -92,6 +92,10 @@ After replacing the Pi row with 1.6.0 and rebuilding the same SDK revision with 
 
 `qualified-launch` used the production table and the Node distribution helper directly. The ordinary Attempt was claimed, started and completed with seven model tool attempts and four target writes (two to alpha, one to beta and one to the direct server). The rejected approval produced zero writes and the unselected server never started. Matching `tool_use` events carried the inner identity and hub results kept the outer identity. The Attempt token was revoked and no fixture processes remained.
 
+## Pi 1.6.1 retest
+
+On 2026-11-27, SDK `dea4d07c63294adbc3ff7d4aab3c217857029a3e` ran the strict `*` suite on macOS 26.5 arm64 with Node 24.22.1, Bun 1.4.4 and the loopback sandbox above. All 19 receipts recorded `acceptance.status: pass` with Pi 1.6.1. `qualified-launch` passed through the production table and Node distribution helper with seven attempts and four writes. The 256-server discovery case passed, with seven inner children at peak. No fixture process remained after any scenario. The production row applies to ordinary SDK-built Pi offers with search-exposed MCP toolsets and permits attribution of verified inner calls. [Upgrade issue](https://github.com/Ancienttwo/byok-sdk/issues/2522)
+
 ## Original F qualification results
 
 The attempt counts below are steps sent by the loopback model after any runtime-native discovery. Executions count only synthetic target `tools/call` receipts and include direct calls in the mixed case. Search discovery itself increments no write receipt. The outer names shown are model-visible. The runtime only emits an inner identity where the SDK has a qualified raw-arguments path and can verify a frozen match.

@@ -3,6 +3,16 @@
 This checklist starts after the published 0.47.1 release. Hosts on an earlier
 release first follow the [0.47.0 checklist](host-upgrade-0.47.0.md) and its predecessors.
 
+## Pi 1.6.1 closure
+
+- Re-prepare Pi inputs compiled with 1.6.0 before dispatch. The new closure
+  rejects the old identity with `preparation_runtime_identity_mismatch`. Rebind
+  Host accounting rulings to the new runtime identity.
+- The pinned keys catalog follows pi-ai 1.6.1. If lookup for a previously
+  cataloged model returns `not_in_catalog`, select an available model for
+  that provider before preparing inputs.
+- Existing pi-durable 1.6.0 SQLite replicas can open in place.
+
 ## OAR 0.136.0 (#2512, #2513)
 
 - `OpenCodeAdapter.listModels()` on OpenCode 2.x reads the catalog from a private `opencode serve --stdio` loopback listener instead of `opencode models --standalone`. Entries now carry `displayName`, `provider` and `effortLevels`, and a cold catalog no longer comes back id-only. The listener is stopped when the read ends, is cancelled or times out. On OpenCode 1.x and 2.x, `effortLevels` no longer lists the native `default` variant. No Host action.

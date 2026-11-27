@@ -75,6 +75,10 @@ const SYNTHETIC: PiModelCatalogTable = {
   groq: {
     'openai-completions': {
       both: { config: SYNTHETIC_CONFIG, input: ['text'] },
+      'no-default': {
+        config: { ...SYNTHETIC_CONFIG, thinkingLevelMap: { off: 'none', minimal: null, low: null, medium: null, high: 'high', xhigh: null, max: null } },
+        input: ['text'],
+      },
       vision: { config: { ...SYNTHETIC_CONFIG, reasoning: false }, input: ['text', 'image'] },
       blocked: { unrepresentable: ['compat.sendSessionAffinityHeaders'] },
     },
@@ -88,9 +92,9 @@ describe('catalog view', () => {
   it('lists pinned entries with their classification, input, reasoning and thinking levels', () => {
     const context = modelRouteContext();
     const choices = (vendor: 'groq' | 'zai') => field(named(context, { field: 'provider_kind', value: vendor }), context, 'model').choices!;
-    expect(choices('groq').find((entry) => entry.value === 'llama-3.3-70b-versatile')).toMatchObject({
-      model: 'llama-3.3-70b-versatile', api: 'openai-completions', status: 'representable',
-      input: ['text'], reasoning: false, thinking_levels: ['off'],
+    expect(choices('groq').find((entry) => entry.value === 'qwen/qwen3.8-27b')).toMatchObject({
+      model: 'qwen/qwen3.8-27b', api: 'openai-completions', status: 'representable',
+      input: ['text', 'image'], reasoning: true, thinking_levels: ['off', 'low', 'medium', 'high'],
     });
     expect(choices('groq').find((entry) => entry.value === 'openai/gpt-oss-120b')).toMatchObject({
       status: 'representable', reasoning: true, thinking_levels: ['low', 'medium', 'high'],
@@ -105,7 +109,7 @@ describe('catalog view', () => {
     const draft = named(context, { field: 'provider_kind', value: 'groq' });
     const choices = field(draft, context, 'model').choices!;
     expect(choices.map((choice) => [choice.value, (choice as { api: string }).api])).toEqual([
-      ['blocked', 'openai-completions'], ['both', 'openai-completions'], ['vision', 'openai-completions'],
+      ['blocked', 'openai-completions'], ['both', 'openai-completions'], ['no-default', 'openai-completions'], ['vision', 'openai-completions'],
       ['both', 'openai-responses'],
     ]);
     expect(choices[0]).toMatchObject({ status: 'unrepresentable', unrepresentable: ['compat.sendSessionAffinityHeaders'], source: 'catalog' });
@@ -174,25 +178,27 @@ describe('linkage', () => {
   it("selects Pi's default level only when the model supports it", () => {
     const supported = named(context, { field: 'provider_kind', value: 'groq' }, { field: 'model', value: 'openai/gpt-oss-120b' });
     expect(supported).toMatchObject({ model_source: 'catalog', model_api: 'openai-completions', thinking_level: PI_DEFAULT_THINKING_LEVEL });
-    const withoutDefault = applyModelRouteChange(supported, { field: 'model', value: 'qwen/qwen3.6-27b' }, context);
+    const synthetic: ModelRouteContext = { catalog: SYNTHETIC, stored: null, policy: {} };
+    const withoutDefault = named(synthetic, { field: 'provider_kind', value: 'groq' }, { field: 'model', value: 'no-default' });
     expect(withoutDefault.thinking_level).toBeNull();
-    expect(field(withoutDefault, context, 'thinking_level')).toMatchObject({
+    expect(field(withoutDefault, synthetic, 'thinking_level')).toMatchObject({
       visible: true, required: true, choices: [{ value: 'off', label: null }, { value: 'high', label: null }], error: { code: 'required' },
     });
-    const unsupported = applyModelRouteChange(withoutDefault, { field: 'thinking_level', value: 'medium' }, context);
-    expect(validateModelRoute(unsupported, context).thinking_level).toEqual({ code: 'thinking_level_unsupported' });
+    const unsupported = applyModelRouteChange(withoutDefault, { field: 'thinking_level', value: 'medium' }, synthetic);
+    expect(validateModelRoute(unsupported, synthetic).thinking_level).toEqual({ code: 'thinking_level_unsupported' });
   });
 
   it('sets off when off is the only level, and the device accepts it', () => {
-    const offOnly = named(context,
+    const synthetic: ModelRouteContext = { catalog: SYNTHETIC, stored: null, policy: {} };
+    const offOnly = named(synthetic,
       { field: 'provider_kind', value: 'groq' },
-      { field: 'model', value: 'llama-3.3-70b-versatile' },
+      { field: 'model', value: 'vision' },
       { field: 'secret', value: { replace: 'k' } });
     expect(offOnly.thinking_level).toBe('off');
-    expect(validateModelRoute(offOnly, context)).toEqual({});
-    expect(persisted(offOnly, context).profile.pi_model).toMatchObject({ reasoning: false, thinkingLevel: 'off' });
-    const unsupported = applyModelRouteChange(offOnly, { field: 'thinking_level', value: 'high' }, context);
-    expect(validateModelRoute(unsupported, context).thinking_level).toEqual({ code: 'thinking_level_unsupported' });
+    expect(validateModelRoute(offOnly, synthetic)).toEqual({});
+    expect(persisted(offOnly, synthetic).profile.pi_model).toMatchObject({ reasoning: false, thinkingLevel: 'off' });
+    const unsupported = applyModelRouteChange(offOnly, { field: 'thinking_level', value: 'high' }, synthetic);
+    expect(validateModelRoute(unsupported, synthetic).thinking_level).toEqual({ code: 'thinking_level_unsupported' });
   });
 
   it('sets off for a reasoning model whose map leaves only off', () => {
@@ -210,15 +216,16 @@ describe('linkage', () => {
   });
 
   it('recomputes the level when switching between off-only and multi-level models', () => {
-    const pick = (draft: ModelRouteDraft, model: string) => applyModelRouteChange(draft, { field: 'model', value: model }, context);
-    const offOnly = named(context, { field: 'provider_kind', value: 'groq' }, { field: 'model', value: 'llama-3.3-70b-versatile' });
+    const synthetic: ModelRouteContext = { catalog: SYNTHETIC, stored: null, policy: {} };
+    const pick = (draft: ModelRouteDraft, model: string) => applyModelRouteChange(draft, { field: 'model', value: model, api: 'openai-completions' }, synthetic);
+    const offOnly = named(synthetic, { field: 'provider_kind', value: 'groq' }, { field: 'model', value: 'vision' });
     expect(offOnly.thinking_level).toBe('off');
-    const multi = pick(offOnly, 'openai/gpt-oss-120b');
+    const multi = pick(offOnly, 'both');
     expect(multi.thinking_level).toBe(PI_DEFAULT_THINKING_LEVEL);
-    expect(pick(multi, 'llama-3.3-70b-versatile').thinking_level).toBe('off');
-    const noDefault = pick(offOnly, 'qwen/qwen3.6-27b');
+    expect(pick(multi, 'vision').thinking_level).toBe('off');
+    const noDefault = pick(offOnly, 'no-default');
     expect(noDefault.thinking_level).toBeNull();
-    expect(validateModelRoute(noDefault, context).thinking_level).toEqual({ code: 'required' });
+    expect(validateModelRoute(noDefault, synthetic).thinking_level).toEqual({ code: 'required' });
   });
 
   it('sets off for an off-only manual pi_model and keeps a supported level when the config changes', () => {
@@ -293,7 +300,7 @@ describe('catalog entries apply only at the vendor base URL (D6)', () => {
     const view = modelRouteView(gateway, context);
     expect(view.catalog_applies).toBe(false);
     expect(field(gateway, context, 'model').choices).toEqual([]);
-    const reselected = applyModelRouteChange(gateway, { field: 'model', value: 'llama-3.3-70b-versatile' }, context);
+    const reselected = applyModelRouteChange(gateway, { field: 'model', value: 'qwen/qwen3.8-27b' }, context);
     expect(reselected.model_source).toBe('manual');
   });
 });
@@ -392,9 +399,9 @@ describe('Host policy', () => {
   };
   const policy: ModelRoutePolicy = {
     vendors: ['groq', 'custom'],
-    models: { groq: ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'] },
+    models: { groq: ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b'] },
     vendor_labels: { custom: 'Self-hosted' },
-    model_labels: { groq: { 'llama-3.3-70b-versatile': 'Llama 3.3' } },
+    model_labels: { groq: { 'qwen/qwen3.8-27b': 'Qwen 3.8' } },
     default_vendor: 'groq',
     default_models: { groq: 'openai/gpt-oss-120b' },
     overrides: [override],
@@ -409,11 +416,11 @@ describe('Host policy', () => {
     ]);
     const models = field(draft, context, 'model').choices!;
     expect(models.map((choice) => [choice.value, choice.label, (choice as { source: string }).source])).toEqual([
-      ['llama-3.3-70b-versatile', 'Llama 3.3', 'catalog'], ['openai/gpt-oss-120b', null, 'host'],
+      ['openai/gpt-oss-120b', null, 'host'], ['qwen/qwen3.8-27b', 'Qwen 3.8', 'catalog'],
     ]);
     expect(validateModelRoute(applyModelRouteChange(draft, { field: 'provider_kind', value: 'zai' }, context), context).provider_kind)
       .toEqual({ code: 'not_a_choice' });
-    const other = applyModelRouteChange(draft, { field: 'model', value: 'qwen/qwen3.8-27b' }, context);
+    const other = applyModelRouteChange(draft, { field: 'model', value: 'openai/gpt-oss-20b' }, context);
     expect(other.model_source).toBeNull();
     expect(validateModelRoute(other, context).model).toEqual({ code: 'not_a_choice' });
   });
@@ -666,7 +673,7 @@ describe('stored capabilities decide catalog recognition', () => {
   }
 
   it('keeps an image-capable entry stored without image-input as manual, and submits it unchanged', () => {
-    const profile = storedFor('qwen/qwen3.6-27b', 'high');
+    const profile = storedFor('qwen/qwen3.8-27b', 'high');
     expect(profile.capabilities).toEqual(['image-input']);
     const without = { ...profile, capabilities: [] };
     const reopened = modelRouteContext({ stored: { profile: without, secret_configured: true } });
@@ -680,7 +687,7 @@ describe('stored capabilities decide catalog recognition', () => {
   });
 
   it('recognizes the entry when the stored capabilities match the entry', () => {
-    const profile = storedFor('qwen/qwen3.6-27b', 'high');
+    const profile = storedFor('qwen/qwen3.8-27b', 'high');
     const reopened = modelRouteContext({ stored: { profile, secret_configured: true } });
     expect(createModelRouteDraft(reopened)).toMatchObject({
       model_source: 'catalog', model_api: 'openai-completions', pi_model: null, thinking_level: 'high',

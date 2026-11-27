@@ -171,7 +171,7 @@ type PiProviderBranch = readonly [file: string, line: string, kind: 'url' | 'dec
 const COPILOT = 'github-copilot is not a catalog vendor';
 const OPENCODE_GO = 'pi_model.providerId explicitly declares opencode-go with openai-completions';
 
-/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.6.0. */
+/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.6.1. */
 const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['api/anthropic-messages.js', 'const isOpenRouter = model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai");', 'url', 'openrouter base_url contains openrouter.ai'],
   ['api/anthropic-messages.js', 'if (model.provider !== "anthropic" || hasRequestAuth(apiKey, headers))', 'unreachable', 'federation runs only without a key; a byok launch always supplies one'],
@@ -214,7 +214,6 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
     'xai adds include reasoning.encrypted_content with thinking off; only grok-4.3 at an explicit off differs (effort none). '
     + 'AWS Bedrock says none disables grok-4.3 reasoning; xAI does not document a store:false replay without '
     + 'encrypted_content; not checked against the xAI API'],
-  ['api/typesafe-system-one.js', 'detectCompat: (model) => model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")', 'url', 'not a projected api; matches by URL regardless'],
   ['utils/openrouter-cost.js', 'return model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai");', 'url',
     'openrouter base_url contains openrouter.ai; it replaces the usage cost with the billed one and changes no request'],
   ['compat.js', 'if (model.provider.startsWith("cloudflare-") && !hasResolvedCloudflareAuth(options)) {', 'unreachable', 'no cloudflare-* catalog vendor'],

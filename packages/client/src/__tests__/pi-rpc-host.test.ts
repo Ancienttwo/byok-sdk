@@ -92,7 +92,7 @@ describe('SDK ordinary Pi RPC entry', () => {
   }, 20_000);
 
   it('pins the Pi private command parser and preserves literal extension messages (#1642)', async () => {
-    expect(PI_VERSION).toBe('1.6.0');
+    expect(PI_VERSION).toBe('1.6.1');
     const parser = (AgentSession.prototype as unknown as { _throwIfExtensionCommand: unknown })._throwIfExtensionCommand;
     expect(typeof parser).toBe('function');
     const runner = { getCommand: (name: string) => name === 'run' ? { name, invocationName: name, sourceInfo: { path: 'pinned-subagents' } } : undefined };

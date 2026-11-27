@@ -47,7 +47,7 @@ checks the running model's image support before delivery.
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.16` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.6.0` | `1.6.0` |
+| Qualified version (PR CI) | — | `1.5.16` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.6.1` | `1.6.1` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Image input declared by descriptor | `images` | no | no | no | no | no | no | yes | no |
@@ -75,7 +75,7 @@ adapter's support for task-scoped toolsets.
 | Runtime | Ordinary search qualification |
 | --- | --- |
 | dsh | `0.2.2-rc.1` on macOS arm64, SDK-built, `sandbox: 'danger-full-access'`, `BYOK_DSH_BIN` executable source, Node distribution helper and SDK authorization `all` |
-| Pi | `1.6.0` on macOS arm64, SDK-built, `agentUserContext: 'inherit'`, default SDK launcher and bundled Pi entry, Node distribution helper and SDK authorization `auto` or `all` |
+| Pi | `1.6.1` on macOS arm64, SDK-built, `agentUserContext: 'inherit'`, default SDK launcher and bundled Pi entry, Node distribution helper and SDK authorization `auto` or `all` |
 | Claude, Codex, Grok, agy, OpenCode 1.x and 2.x | Closed |
 
 The [runtime evidence](researches/2026-11-19-mcp-search-runtime-qualification.md)

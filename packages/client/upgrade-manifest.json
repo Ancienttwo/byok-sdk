@@ -14,6 +14,31 @@
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "pi-161-closure",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "Re-prepare Pi inputs for the 1.6.1 closure and replace removed model IDs in the pinned keys catalog. Pi-durable 1.6.0 SQLite replicas open in place.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-161-closure",
+      "items": [
+        "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+        "store:pi-durable"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+      "change": "changed",
+      "entry": "pi-161-closure"
+    },
+    {
+      "item": "store:pi-durable",
+      "change": "changed",
+      "before": "@earendil-works/pi-durable@1.6.0",
+      "after": "@earendil-works/pi-durable@1.6.1",
+      "entry": "pi-161-closure"
+    }
+  ]
 }
