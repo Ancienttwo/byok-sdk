@@ -141,7 +141,8 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
           throw new ByokCloudError('invalid_request', 'the requested harness selection requires a model ID');
         }
         if (harness === undefined || !harnessSupportsTarget(harness, target)) {
-          throw new ByokCloudError('agent_capability_missing', 'the device does not advertise the requested harness, selection mode and effort');
+          const options = target.serviceTier === undefined ? 'effort' : 'effort and service tier options';
+          throw new ByokCloudError('agent_capability_missing', `the device does not advertise the requested harness, selection mode and ${options}`);
         }
       }
     }

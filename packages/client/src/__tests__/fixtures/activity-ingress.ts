@@ -7,6 +7,8 @@ export function testHarnesses(adapters: readonly RuntimeAdapter[]): HarnessInfo[
     selectionModes: [...descriptor.selectionModes],
     ...(descriptor.defaultModelModes === undefined ? {} : { defaultModelModes: [...descriptor.defaultModelModes] }),
     effort: descriptor.supportsEffort === true,
+    ...(descriptor.supportsServiceTier === true ? { serviceTier: true } : {}),
+    ...(descriptor.supportsServiceTierFallback === true ? { serviceTierFallback: true } : {}),
     ...(descriptor.byokProviderId === undefined ? {} : { byokProviderId: descriptor.byokProviderId }),
   } }));
 }

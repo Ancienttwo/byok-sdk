@@ -451,6 +451,67 @@ describe('Codex persistent app-server adapter', () => {
     expect(await fs.readFile(receipt, 'utf8')).not.toContain('turn/start');
   });
 
+  it.each([
+    { serviceTier: 'fast', sessionRef: undefined, fallback: undefined, readback: undefined, applied: 'fast' },
+    { serviceTier: 'default', sessionRef: 'fake-thread-1', fallback: undefined, readback: undefined, applied: 'default' },
+    { serviceTier: 'fast', sessionRef: 'fake-thread-1', fallback: 'default' as const, readback: 'default', applied: 'default' },
+  ])('applies and projects $serviceTier (resume=$sessionRef, fallback=$fallback)', async ({ serviceTier, sessionRef, fallback, readback, applied }) => {
+    const resources = await ctx({ FAKE_CODEX_TIER_READBACK: readback, FAKE_CODEX_TIER_UPDATE: 'flex' });
+    const receipt = path.join(resources.workspaceDir, 'tier-rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    const session = await open(adapter(), { ...task, serviceTier, serviceTierFallback: fallback, sessionRef }, resources);
+    const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const method = sessionRef === undefined ? 'thread/start' : 'thread/resume';
+    const opened = frames.findIndex(frame => frame.method === method);
+    expect(opened).toBeGreaterThanOrEqual(0);
+    expect(frames[opened].params).toMatchObject({ serviceTier });
+    expect(opened).toBeLessThan(frames.findIndex(frame => frame.method === 'turn/start'));
+    expect((await turn(session)).filter(event => event.type === 'service_tier')).toEqual([
+      { type: 'service_tier', serviceTier: applied }, { type: 'service_tier', serviceTier: 'flex' },
+    ]);
+  });
+
+  it.each([
+    { readback: 'default', fallback: undefined },
+    { readback: 'missing', fallback: 'default' as const },
+    { readback: 'flex', fallback: 'default' as const },
+  ])('fails before prompting for tier $readback (fallback=$fallback)', async ({ readback, fallback }) => {
+    const resources = await ctx({ FAKE_CODEX_TIER_READBACK: readback });
+    const receipt = path.join(resources.workspaceDir, 'tier-rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    const { pids, spawnFn } = tracked();
+    await expect(open(adapter({ spawnFn }), { ...task, serviceTier: 'fast', serviceTierFallback: fallback }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+    });
+    expect(await fs.readFile(receipt, 'utf8')).not.toContain('turn/start');
+    expect(pids).toHaveLength(1);
+    expect(gone(pids[0]!)).toBe(true);
+  });
+
+  it.each([undefined, 'fake-thread-1'])('maps a Codex open RPC refusal of an unknown tier to invalid_request (resume=%s)', async sessionRef => {
+    const resources = await ctx();
+    const receipt = path.join(resources.workspaceDir, 'tier-rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    const { pids, spawnFn } = tracked();
+    const method = sessionRef === undefined ? 'thread/start' : 'thread/resume';
+    await expect(open(adapter({ spawnFn }), { ...task, serviceTier: 'turbo', sessionRef }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+      cause: { cause: { method, native: { code: -32600, message: expect.stringContaining('unknown variant `turbo`') } } },
+    });
+    expect(await fs.readFile(receipt, 'utf8')).not.toContain('turn/start');
+    expect(pids).toHaveLength(1);
+    expect(gone(pids[0]!)).toBe(true);
+  });
+
+  it('refuses a manifest that changes the admitted tier before spawning Codex', async () => {
+    const { pids, spawnFn } = tracked();
+    const resources = await ctx();
+    await expect(open(adapter({ spawnFn }), { ...task, serviceTier: 'fast' }, {
+      ...resources, startTierOptions: { serviceTier: 'default' },
+    })).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message: expect.stringContaining('different runtime selection') });
+    expect(pids).toEqual([]);
+  });
+
   it('uses thread/resume without migrating thread identity', async () => {
     const s = await open(adapter(), { ...task, sessionRef: 'fake-thread-1' });
     expect(s.sessionRef).toBe('fake-thread-1');

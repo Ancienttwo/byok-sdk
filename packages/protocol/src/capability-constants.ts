@@ -128,5 +128,11 @@ export const NATIVE_SESSIONS_CAPABILITY = 'native-sessions' as const;
 /** Admits per-task reasoning effort and per-task harness model selection. */
 export const TASK_EXECUTION_OPTIONS_CAPABILITY = 'task-execution-options' as const;
 
+/** Admits explicit harness service-tier selection and fallback. */
+export const HARNESS_SERVICE_TIER_CAPABILITY = 'harness-service-tier' as const;
+
+export const HARNESS_SERVICE_TIER_MAX_LENGTH = 64;
+export const HARNESS_SERVICE_TIER_TOKEN = /^[\x21-\x7e]+$/u;
+
 /** Admits image blob references in task offers and steers. */
 export const INPUT_IMAGES_CAPABILITY = 'input-images' as const;

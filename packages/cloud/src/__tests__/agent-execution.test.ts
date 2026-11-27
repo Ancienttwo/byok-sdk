@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
-import { RESULT_SCHEMA_MAX_BYTES, checkResultSchema } from '@byok-sdk/protocol';
+import { HARNESS_SERVICE_TIER_CAPABILITY, RESULT_SCHEMA_MAX_BYTES, checkResultSchema } from '@byok-sdk/protocol';
 import { AgentExecutionInputSchema } from '../agent-execution';
 import { TEST_HARNESSES, TENANT_A, createHarness } from './support/harness';
 
@@ -231,6 +231,21 @@ describe('fresh Agent execution submission', () => {
         payload: { ...payload, target: SELECTION, terminalProjection: { mode: 'none' } } });
       await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate))
         .rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining('requested harness, selection mode and effort') });
+      await expectNothingWritten(harness, device.deviceId);
+    });
+
+    it('names service tier when the harness omits requested fallback support', async () => {
+      const capabilities = [...BASE_CAPABILITIES, HARNESS_SERVICE_TIER_CAPABILITY];
+      const { harness, device, payload } = await setup(capabilities);
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities,
+        harnesses: [{ id: 'codex', capabilities: { selectionModes: ['subscription'], effort: true, serviceTier: true } }],
+      });
+      const candidate = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId, payload: {
+        ...payload, target: { ...SELECTION, serviceTier: 'fast', serviceTierFallback: 'default' }, terminalProjection: { mode: 'none' },
+      } });
+      await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate)).rejects.toMatchObject({
+        code: 'agent_capability_missing', message: expect.stringContaining('service tier'),
+      });
       await expectNothingWritten(harness, device.deviceId);
     });
 

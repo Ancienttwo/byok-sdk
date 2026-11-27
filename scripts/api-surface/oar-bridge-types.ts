@@ -31,7 +31,7 @@ type BridgeArgs = Parameters<typeof Bridge.codexSession>;
 type Executable = Extract<VendorArgs[1], { via: 'executable' }>;
 type BridgeInstallation = Mutable<Pick<Executable, 'kind' | 'via' | 'command'>>;
 type BridgeOptions = Mutable<
-  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'effort' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers' | 'endTurnProcessesOnAbort'> & Required<Pick<VendorArgs[2], 'env' | 'retainedBytes'>>
+  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'effort' | 'serviceTier' | 'serviceTierFallback' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers' | 'endTurnProcessesOnAbort'> & Required<Pick<VendorArgs[2], 'env' | 'retainedBytes'>>
 >;
 type VendorHooks = NonNullable<VendorArgs[4]>;
 type BridgeHooks = Mutable<Omit<VendorHooks, 'onRecord'>> & {
@@ -302,7 +302,8 @@ export type CheckDshModelConfirmation = Assert<Equal<DshBridge.ModelConfirmation
 // profile. The adapter assembles the session profile; the fold stays opaque.
 import type * as ClaudeBridge from '../../packages/client/src/runtime/claude-session-runtime.js';
 import type { ClaudeStreamSessionOptions } from '../../packages/client/src/adapters/claude/stream-session.js';
-export type CheckClaudeEffort = Assert<Equal<Pick<ClaudeStreamSessionOptions, 'effort'>, Mutable<Pick<VendorArgs[2], 'effort'>>>>;
+type ClaudeExecutionOptions = 'effort' | 'serviceTier' | 'serviceTierFallback';
+export type CheckClaudeExecutionOptions = Assert<Equal<Pick<ClaudeStreamSessionOptions, ClaudeExecutionOptions>, Mutable<Pick<VendorArgs[2], ClaudeExecutionOptions>>>>;
 import type { streamJsonSession as vendorStreamJsonSession, StreamJsonSessionHooks } from '../../packages/client/vendor/oar/223703d/shared/stream-json/session.js';
 import type { StreamJsonSessionProfile } from '../../packages/client/vendor/oar/223703d/shared/stream-json/profile.js';
 import type { claudeProjectionProfile as vendorClaudeProfile, ClaudeProjectionState as VendorClaudeState } from '../../packages/client/vendor/oar/223703d/runtimes/claude/projection.js';
@@ -324,7 +325,10 @@ type ClaudeBridgeSession = {
 };
 type ClaudeSharedProfileKeys = 'capabilities' | 'steer' | 'consume' | 'open' | 'exited' | 'disposing';
 export type CheckClaudeExports = Assert<Equal<keyof typeof ClaudeBridge,
-  'streamJsonSession' | 'claudeSessionCapabilities' | 'claudeProjectionProfile' | 'initialClaudeProjection' | 'resumedClaudeProjection' | 'sessionCredentialRedactor'>>;
+  'streamJsonSession' | 'claudeSessionCapabilities' | 'claudeProjectionProfile' | 'initialClaudeProjection' | 'resumedClaudeProjection' | 'sessionCredentialRedactor'
+  | keyof typeof ClaudeTier>>;
+import type * as ClaudeTier from '../../packages/client/vendor/oar/223703d/runtimes/claude/service-tier.js';
+export type CheckClaudeTierHelpers = Assert<Assignable<typeof ClaudeTier, Pick<typeof ClaudeBridge, keyof typeof ClaudeTier>>>;
 export type CheckClaudeControl = Assert<Equal<ClaudeBridge.ClaudeControl, BridgeControl>>;
 export type CheckClaudeRecord = Assert<Equal<ClaudeBridge.ClaudeRecord, Flatten<BridgeRecord>>>;
 export type CheckClaudeSession = Assert<Equal<ClaudeBridge.RawClaudeSession, ClaudeBridgeSession>>;

@@ -4,7 +4,7 @@ import { installationHoldsStart } from '../../util/service-installation-record.j
 import { AuthRequestAbortedError } from '../auth-manager.js';
 import { DeviceCredentialCommandAbortedError } from '../device-credential-store.js';
 import path from 'node:path';
-import { INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
+import { HARNESS_SERVICE_TIER_CAPABILITY, INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
 import { TaskRunner } from '../task-runner.js';
 import type { DaemonScope } from './scope.js';
 import { openStartRun } from './start-run.js';
@@ -36,8 +36,9 @@ async function refreshHarnessInventory(scope: DaemonScope, signal: AbortSignal):
       daemonState.detectedHarnessFacts = scan.harnesses;
       daemonState.detectedRuntimeUnavailable = scan.runtimeUnavailable;
       const imagesChanged = scope.setHelloCapability(INPUT_IMAGES_CAPABILITY, scan.harnesses.some(({ capabilities }) => capabilities.images !== false));
+      const tierChanged = scope.setHelloCapability(HARNESS_SERVICE_TIER_CAPABILITY, scan.harnesses.some(({ capabilities }) => capabilities.serviceTier === true));
       const inventoryChanged = connection.updateHarnessInventory(scan.harnesses, scan.runtimeUnavailable);
-      if (imagesChanged && !inventoryChanged) connection.refreshHello();
+      if ((imagesChanged || tierChanged) && !inventoryChanged) connection.refreshHello();
     } catch {
       if (!signal.aborted) console.warn('[byok/client] executor inventory scan failed');
     }

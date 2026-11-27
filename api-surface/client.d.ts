@@ -6125,6 +6125,8 @@ export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> 
     instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
     images?: readonly RuntimeInputImage[];
     effort?: string;
+    serviceTier?: string;
+    serviceTierFallback?: 'default';
     modelId?: string;
     sessionRef?: string;
 };
@@ -6284,6 +6286,8 @@ export interface RuntimeAdapterDescriptor {
     readonly defaultModelModes?: readonly DefaultModelSelectionMode[];
     readonly byokProviderId?: string;
     readonly supportsEffort?: boolean;
+    readonly supportsServiceTier?: boolean;
+    readonly supportsServiceTierFallback?: boolean;
     readonly requiresMcpToolsetToolObservation?: boolean;
     readonly mcpToolApprovals?: boolean;
     readonly progressMessageBoundary?: 'event' | 'session';
@@ -6327,6 +6331,8 @@ export interface RuntimeOperationManifest {
     readonly requiredToolsetIds: readonly string[];
     readonly selection?: HarnessSelection;
     readonly effort?: string;
+    readonly serviceTier?: string;
+    readonly serviceTierFallback?: 'default';
     readonly sessionRef?: string;
     readonly agentRef?: AgentRef;
     readonly cwd?: string;

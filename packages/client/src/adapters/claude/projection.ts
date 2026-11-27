@@ -1,4 +1,4 @@
-import { BASE_CONTENT_TYPES, objectRecord as object, projectProviderContext } from '../shared-rules.js';
+import { BASE_CONTENT_TYPES, objectRecord as object, projectProviderContext, projectedServiceTier } from '../shared-rules.js';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -33,6 +33,7 @@ export interface ClaudeFrame {
   readonly native: ClaudeStreamMessage;
   readonly agentPath: readonly string[];
   readonly context?: Record<string, unknown>;
+  readonly serviceTier?: Extract<AgentEvent, { type: 'service_tier' }>;
   readonly textTail?: { readonly text: string; readonly continues: boolean };
 }
 
@@ -50,9 +51,11 @@ export function claudeRecordFrame(record: ClaudeRecord): ClaudeFrame | undefined
       if (event?.kind === 'usage') context = object(object(event.usage)?.context);
     }
   }
+  const serviceTier = projectedServiceTier(body?.events);
   const tail = object(body?.byokTextTail);
   const textTail = typeof tail?.text === 'string' && typeof tail.continues === 'boolean' ? { text: tail.text, continues: tail.continues } : undefined;
-  return { native: frame, agentPath: record.agentPath, context, ...(textTail === undefined ? {} : { textTail }) };
+  return { native: frame, agentPath: record.agentPath, context,
+    ...(serviceTier === undefined ? {} : { serviceTier }), ...(textTail === undefined ? {} : { textTail }) };
 }
 
 /** The context window of the model `system/init` named, else the one window `result.modelUsage` reports. */

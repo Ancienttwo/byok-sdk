@@ -40,7 +40,7 @@ import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions
 import { AssistantMessageTracker, mapClaudeMessageToAgentEvents, type ClaudeFrame, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
 import { ClaudeFailureEvidence } from './failure-evidence.js';
 import { requireImageInput } from '../input-images.js';
-import { claudeSessionCapabilities, sessionCredentialRedactor, type ClaudeCredentialRedactor } from '../../runtime/claude-session-runtime.js';
+import { claudeServiceTierSettings, claudeSessionCapabilities, sessionCredentialRedactor, type ClaudeCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { ClaudeStreamSession } from './stream-session.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import type { spawn } from 'node:child_process';
@@ -295,6 +295,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
       selectionModes: ['device-default', 'subscription', ...(this.byok === undefined ? [] : ['byok' as const])],
       ...(this.byok === undefined ? {} : { byokProviderId: this.byok.providerId }),
       supportsEffort: true,
+      supportsServiceTier: true,
+      supportsServiceTierFallback: true,
       // `progress` events are complete text blocks, never deltas, and
       // `progressStartsMessage` joins the blocks of one message, so the
       // closing reply is the last assistant message. A run that repeats its
@@ -362,7 +364,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    const { effort } = input.offer;
+    const { effort, serviceTier, serviceTierFallback } = input.offer;
     const requested = offerSelection(input.offer.target);
     if (requested?.mode === 'byok' && (requested.modelId === undefined || requested.modelId.trim() === '')) {
       return { kind: 'reject', code: 'invalid_request', reason: 'Claude requires an explicit BYOK model ID', retryable: false };
@@ -395,7 +397,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     const launched = invocation;
     let admittedLaunch: ClaudeSubscriptionLaunch | undefined;
     const operation: PreparedRuntimeOperation = {
-      start: startInput => this.startPrepared(startInput, selection, launched, effort, admittedLaunch),
+      start: startInput => this.startPrepared(startInput, selection, launched, { effort, serviceTier, serviceTierFallback }, admittedLaunch),
     };
     if (selection.mode === 'subscription') {
       operation.resolveRuntimeLaunch = async ({ cwd, env, scratch, signal = input.signal }) => {
@@ -426,9 +428,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
     startInput: RuntimeOperationStartInput,
     selection: ClaudeSelection,
     invocation: RuntimeInvocation,
-    effort: string | undefined,
+    executionOptions: Pick<RuntimeTaskInput, 'effort' | 'serviceTier' | 'serviceTierFallback'>,
     admittedLaunch: ClaudeSubscriptionLaunch | undefined,
   ): Promise<Session> {
+    const { effort, serviceTier, serviceTierFallback } = executionOptions;
     const signal = startInput.signal;
     const rawEnv = { ...startInput.env, ...startInput.scratch.env };
     const env = admittedLaunch === undefined ? claudeCredentialEnvironment(rawEnv) : { ...admittedLaunch.env };
@@ -523,14 +526,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
         throwIfCancelled();
         mcpArgs.push('--mcp-config', mcpConfigPath);
       }
-      if (userContextSettings) {
-        // A file, not inline JSON: Windows command-shim quoting and length.
-        const settingsPath = path.join(sdkDir, 'claude-settings.json');
-        await fs.writeFile(settingsPath, JSON.stringify(userContextSettings), { mode: 0o600 });
-        throwIfCancelled();
-        mcpArgs.push('--settings', settingsPath);
-      }
-
       const resumeSessionId = startInput.manifest.sessionRef;
       let manifestSelection: ClaudeSelection;
       try {
@@ -544,7 +539,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
       }
       const manifestModelId = manifestSelection.mode === 'device-default' ? undefined : manifestSelection.modelId;
       const modelId = selection.mode === 'device-default' ? undefined : selection.modelId;
-      if (manifestSelection.mode !== selection.mode || manifestModelId !== modelId || startInput.manifest.effort !== effort) {
+      if (manifestSelection.mode !== selection.mode || manifestModelId !== modelId || startInput.manifest.effort !== effort
+        || startInput.manifest.serviceTier !== serviceTier || startInput.manifest.serviceTierFallback !== serviceTierFallback) {
         throw new RuntimeExecutionFailure({
           phase: 'start',
           retry: 'non-retryable',
@@ -561,6 +557,19 @@ export class ClaudeAdapter implements RuntimeAdapter {
       if (selection.mode === 'subscription' && (admittedLaunch === undefined || admittedLaunch !== startInput.runtimeLaunch
         || admittedLaunch.cwd !== manifestCwd || admittedLaunch.scratch !== startInput.scratch)) {
         throw invalidClaudeRequest('Claude subscription start requires its exact admitted launch');
+      }
+      if (userContextSettings || serviceTier !== undefined) {
+        let tierSettings: Record<string, unknown>;
+        try {
+          tierSettings = claudeServiceTierSettings(serviceTier);
+        } catch (cause) {
+          throw invalidClaudeRequest('claude_service_tier_unsupported', cause);
+        }
+        // One process-local settings layer, including on Windows command shims.
+        const settingsPath = path.join(sdkDir, 'claude-settings.json');
+        await fs.writeFile(settingsPath, JSON.stringify({ ...userContextSettings, ...tierSettings }), { mode: 0o600 });
+        throwIfCancelled();
+        mcpArgs.push('--settings', settingsPath);
       }
       let launchModel = manifestModelId;
       if (effort !== undefined) {
@@ -638,7 +647,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       throwIfCancelled();
       try {
         await Promise.race([opened.open({
-          effort,
+          ...executionOptions,
           ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
           maxRetainedBytes: this.maxRetainedBytes,
           ...(native === undefined && gate === undefined ? {} : { initialize: { hooks: gate?.hooks ?? null } }),
@@ -840,7 +849,8 @@ class ClaudeSession implements Session {
         // pulling the next raw line, so this iterator still yields exactly
         // one `AgentEvent` per `next()` call like every other adapter's
         // `Session.events`.
-        let pending: Array<AgentEvent | MessageDraftDelta> = [];
+        const initialTier = stream.takeInitialServiceTier();
+        let pending: Array<AgentEvent | MessageDraftDelta> = initialTier === undefined ? [] : [initialTier];
         let terminalFailure: RuntimeExecutionFailure | undefined;
         // Cross-model re-review finding (P1 regression, the "claude-hang
         // class"): set once THIS turn's own `result` frame has been read off
@@ -900,7 +910,7 @@ class ClaudeSession implements Session {
                 }, { cause: stream.terminalError });
               }
 
-              const { native: value, agentPath, context, textTail } = frame;
+              const { native: value, agentPath, context, serviceTier, textTail } = frame;
               const root = agentPath.length === 0;
               if (root && value.type === 'result') turnSettled = true;
               if (root) failureEvidence.observe(value);
@@ -931,6 +941,7 @@ class ClaudeSession implements Session {
                 stream.recordUnmappedFrame(mapped.unmappedLabel);
               }
               pending = mapped.events;
+              if (root && serviceTier !== undefined) pending.unshift(serviceTier);
               if (textTail !== undefined) {
                 const continuation: AgentEvent = { type: 'progress', text: textTail.text, ...(root ? {} : { agentPath: [...agentPath] }) };
                 if (textTail.continues) assistantMessages.continueMessage(continuation);
@@ -975,6 +986,10 @@ class ClaudeSession implements Session {
     }
     if (task.effort !== undefined && task.effort !== this.stream.effort) {
       throw new PolicyUnsupportedError('claude persistent session cannot change effort');
+    }
+    if ((task.serviceTier !== undefined || task.serviceTierFallback !== undefined)
+      && (task.serviceTier !== this.stream.serviceTier || task.serviceTierFallback !== this.stream.serviceTierFallback)) {
+      throw new PolicyUnsupportedError('claude persistent session cannot change service tier or fallback');
     }
     const selection = offerSelection(task.target);
     if (selection !== undefined && (selection.mode !== this.selection.mode ||

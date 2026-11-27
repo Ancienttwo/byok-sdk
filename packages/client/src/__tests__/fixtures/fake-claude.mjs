@@ -546,6 +546,17 @@ function runProbeOrTurnFlow() {
     } catch {
       return;
     }
+    if (msg.type === 'control_request' && msg.request?.subtype === 'initialize' && argv.includes('--settings')) {
+      const { fastMode } = JSON.parse(readFileSync(argv[argv.indexOf('--settings') + 1], 'utf8'));
+      if (typeof fastMode === 'boolean') {
+        const state = process.env.FAKE_CLAUDE_TIER_READBACK ?? (fastMode ? 'on' : 'off');
+        const response = state === 'initialize-error'
+          ? { subtype: 'error', error: 'fixture initialization unavailable' }
+          : { subtype: 'success', response: state === 'missing' ? {} : { fast_mode_state: state } };
+        send({ type: 'control_response', response: { ...response, request_id: msg.request_id } });
+        return;
+      }
+    }
     if (msg.type === 'control_request' && msg.request?.subtype === 'interrupt') {
       if (process.env.FAKE_CLAUDE_CONTROL_RECEIPT) writeFileSync(process.env.FAKE_CLAUDE_CONTROL_RECEIPT, JSON.stringify(msg));
       if (process.env.FAKE_CLAUDE_INTERRUPT_NO_ACK === '1') return;
@@ -595,6 +606,7 @@ function runProbeOrTurnFlow() {
       session_id: reportedSessionId,
       tools: nativeTools ?? ['Bash', 'Edit', 'Read', 'Write'],
       permissionMode: 'default',
+      ...(process.env.FAKE_CLAUDE_TIER_UPDATE === undefined ? {} : { fast_mode_state: process.env.FAKE_CLAUDE_TIER_UPDATE }),
     });
 
     if (process.env.FAKE_CLAUDE_UNKNOWN_TOP_LEVEL === '1' && turn === 1) {

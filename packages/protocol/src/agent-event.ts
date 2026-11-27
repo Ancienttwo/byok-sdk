@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BlobRefSchema } from './blob.js';
-import { TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from './constants.js';
+import { HARNESS_SERVICE_TIER_MAX_LENGTH, HARNESS_SERVICE_TIER_TOKEN, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from './constants.js';
 
 /**
  * Maximum UTF-16 length of {@link AgentEventSpillSchema}'s `unstoredReason`.
@@ -69,6 +69,9 @@ export type AgentEventSpill = z.infer<typeof AgentEventSpillSchema>;
 const AgentPathSchema = z.array(z.string().min(1).max(128)).min(1).max(16);
 const agentPath = AgentPathSchema.optional();
 
+export const ServiceTierSchema = z.string().min(1).max(HARNESS_SERVICE_TIER_MAX_LENGTH)
+  .regex(HARNESS_SERVICE_TIER_TOKEN, 'service tier must be a non-whitespace ASCII token');
+
 /**
  * Normalized event shape that every runtime adapter (pi / claude / codex)
  * translates its native JSONL output into. This is the interior of a
@@ -101,6 +104,8 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('artifact'), name: z.string(), contentType: z.string() }),
   z.object({ type: z.literal('turn_end') }),
+  /** Effective tier as reported by the runtime session. */
+  z.object({ type: z.literal('service_tier'), serviceTier: ServiceTierSchema }),
   z.object({ type: z.literal('error'), message: z.string(), agentPath }),
   z.object({ type: z.literal('subagent_start'), agentPath: AgentPathSchema }),
   z.object({ type: z.literal('subagent_end'), agentPath: AgentPathSchema }),

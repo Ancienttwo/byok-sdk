@@ -157,6 +157,8 @@ export async function detectRuntimes(adapters: RuntimeAdapter[], allowlist?: rea
         selectionModes: [...adapter.descriptor.selectionModes],
         ...(adapter.descriptor.defaultModelModes === undefined ? {} : { defaultModelModes: [...adapter.descriptor.defaultModelModes] }),
         effort: adapter.descriptor.supportsEffort === true,
+        ...(adapter.descriptor.supportsServiceTier === true ? { serviceTier: true } : {}),
+        ...(adapter.descriptor.supportsServiceTierFallback === true ? { serviceTierFallback: true } : {}),
         ...(adapter.descriptor.byokProviderId === undefined ? {} : { byokProviderId: adapter.descriptor.byokProviderId }),
       },
       ...(versionPolicy === undefined ? {} : { versionPolicy }),

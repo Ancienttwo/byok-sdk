@@ -451,12 +451,13 @@ export function runtimeTaskInput(payload: AcceptedOfferPayload): RuntimeTaskInpu
   void egressPolicy;
   void messageEgress;
   void preparation;
-  const effort = offer.target.lane === 'auto' ? undefined : offer.target.effort;
-  const selection = offer.target.lane === 'harness' ? offer.target.selection : undefined;
+  const { effort, serviceTier, serviceTierFallback, selection } = offer.target.lane === 'harness' ? offer.target : {};
   const modelId = selection?.mode === 'adapter-model' || selection?.mode === 'byok' ? selection.modelId : undefined;
   return { ...offer,
     ...(session.mode === 'resume' ? { sessionRef: session.sessionRef } : {}),
     ...(effort === undefined ? {} : { effort }),
+    ...(serviceTier === undefined ? {} : { serviceTier }),
+    ...(serviceTierFallback === undefined ? {} : { serviceTierFallback }),
     ...(modelId === undefined ? {} : { modelId }),
   } as RuntimeTaskInput;
 }

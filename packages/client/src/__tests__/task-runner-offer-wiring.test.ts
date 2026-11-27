@@ -12,7 +12,7 @@ import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
-import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
 import type { BlobResolver } from '../daemon/blob-client';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 
@@ -124,6 +124,37 @@ describe('TaskRunner offer/admission host wiring (S3)', () => {
     forgetHost(runner);
   });
 
+  it.each([true, false])('admits the tier only on the named adapter (supports tier: %s)', async supported => {
+    const sent: Envelope[] = [];
+    const stub = new StubRuntimeAdapter('codex');
+    const start = vi.fn<PreparedRuntimeOperation['start']>(async ({ manifest }) => {
+      expect(Object.isFrozen(manifest)).toBe(true);
+      expect(manifest).toMatchObject({ serviceTier: 'fast', serviceTierFallback: 'default' });
+      const session = new StubSession('stub-session-tier');
+      session.emit({ type: 'turn_end' });
+      return session;
+    });
+    const prepare = vi.fn<RuntimeAdapter['prepare']>(async ({ offer }) => {
+      expect(offer).toMatchObject({ serviceTier: 'fast', serviceTierFallback: 'default' });
+      return { kind: 'prepared', operation: { start } };
+    });
+    const descriptor = supported ? { ...stub.descriptor, supportsServiceTier: true, supportsServiceTierFallback: true } : stub.descriptor;
+    const runner = makeRunner(sent, { adapters: [{
+      descriptor, detect: () => stub.detect(), runtimeEnvironment: () => stub.runtimeEnvironment(), prepare,
+    }] });
+    const taskId = 'task-tier';
+    await offer(runner, taskId, { target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' },
+      serviceTier: 'fast', serviceTierFallback: 'default' } });
+    expect(prepare).toHaveBeenCalledTimes(supported ? 1 : 0);
+    expect(start).toHaveBeenCalledTimes(supported ? 1 : 0);
+    expect(sent.some(envelope => envelope.type === 'task.claim')).toBe(supported);
+    if (!supported) expect(sent.find(envelope => envelope.type === 'task.decline')?.payload).toMatchObject({
+      reason: expect.stringContaining('service tier'), retryable: false,
+    });
+    await runner.shutdownActiveTasks('test complete');
+    forgetHost(runner);
+  });
+
   it('advances through claim/start and leaves the task running in the reducer (S4 boundary)', async () => {
     const sent: Envelope[] = [];
     const runner = makeRunner(sent);
@@ -148,7 +179,7 @@ import { PI_MEMORY_LANE } from '../bin/pi-memory-lane';
 import * as nativeRenderer from '../daemon/native-sessions/renderer';
 import { vi } from 'vitest';
 import { NATIVE_SESSIONS_GUIDANCE } from '../daemon/memory-guidance';
-import type { RuntimeAdapter, RuntimeOperationStartInput } from '../types';
+import type { PreparedRuntimeOperation, RuntimeAdapter, RuntimeOperationStartInput } from '../types';
 
 function memoryAdapter(): { adapter: RuntimeAdapter; stub: StubRuntimeAdapter; starts: RuntimeOperationStartInput[] } {
   const stub = new StubRuntimeAdapter();

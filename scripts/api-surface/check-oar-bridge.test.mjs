@@ -168,6 +168,11 @@ test('OAR Claude JS bridge re-exports the checked stream-json session and Claude
     ]],
     ['../../vendor/oar/223703d/shared/credential-redactor.js', [['sessionCredentialRedactor', 'sessionCredentialRedactor']]],
     ['../../vendor/oar/223703d/shared/stream-json/session.js', [['claudeSessionCapabilities', 'claudeSessionCapabilities']]],
+    ['../../vendor/oar/223703d/runtimes/claude/service-tier.js', [
+      ['claudeServiceTierSettings', 'claudeServiceTierSettings'],
+      ['claudeServiceTierRefusal', 'claudeServiceTierRefusal'],
+      ['claudeServiceTierEvents', 'claudeServiceTierEvents'],
+    ]],
   ]);
 });
 

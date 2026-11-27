@@ -136,6 +136,8 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
     requiredToolsetIds: requiredToolsets ?? [],
     ...(selection === undefined ? {} : { selection }),
     ...(offered.effort === undefined ? {} : { effort: offered.effort }),
+    ...(offered.serviceTier === undefined ? {} : { serviceTier: offered.serviceTier }),
+    ...(offered.serviceTierFallback === undefined ? {} : { serviceTierFallback: offered.serviceTierFallback }),
     ...(sessionRef === undefined ? {} : { sessionRef }),
     agentRef: agentBinding.resolution.agentRef,
     cwd: workspaceDir,

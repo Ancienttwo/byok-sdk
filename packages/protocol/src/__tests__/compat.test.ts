@@ -12,6 +12,7 @@ import { TerminalResidentMemoryOverLimitSchema, pairDeviceDigest } from '../inde
 import {
   AGENT_MEMORY_START_REFUSALS,
   CAPABILITY_FLAGS,
+  HARNESS_SERVICE_TIER_CAPABILITY,
   EnvelopeSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   EnvelopeValidationError,
@@ -841,6 +842,31 @@ describe('compat v8: published 0.45.0 baseline', () => {
       assertBaselineDecoded(original, decoded, released, `envelope line ${line.index + 1} (${line.type})`);
       expect(parseMessage(decoded)).toEqual(decoded);
     }
+  });
+
+  it('published v8 strips new harness discovery fields and refuses tier offers while tierless offers still decode', () => {
+    const hello = v8Corpus.find(line => line.type === 'conn.hello'
+      && (line.payload.capabilities as string[]).includes(HARNESS_SERVICE_TIER_CAPABILITY))!;
+    const old = v8Release.decodeEnvelope(hello.raw);
+    expect(old.type).toBe('conn.hello');
+    if (old.type !== 'conn.hello') throw new Error('expected conn.hello');
+    expect(old.payload.capabilities).toContain(HARNESS_SERVICE_TIER_CAPABILITY);
+    for (const { capabilities } of old.payload.harnesses ?? []) {
+      expect(capabilities).not.toHaveProperty('serviceTier');
+      expect(capabilities).not.toHaveProperty('serviceTierFallback');
+    }
+    expect(old.payload.harnesses).toHaveLength(2);
+    const presence = v8HttpCorpus.find(line => line.surface === 'PresencePublishRequest'
+      && line.body.includes('serviceTierFallback'))!;
+    const oldPresence = v8Release.PresencePublishRequestSchema.parse(JSON.parse(presence.body));
+    expect(oldPresence.harnesses).toEqual(old.payload.harnesses);
+
+    const offer = v8Corpus.find(line => line.type === 'task.offer'
+      && requiredReceiverCapabilities(line.type, line.payload).includes(HARNESS_SERVICE_TIER_CAPABILITY))!;
+    expect(() => v8Release.decodeEnvelope(offer.raw)).toThrow(v8Release.EnvelopeValidationError);
+    const { serviceTier: _serviceTier, serviceTierFallback: _serviceTierFallback, ...target } = offer.payload.target as Record<string, unknown>;
+    const offerWithoutTier = { ...JSON.parse(offer.raw), payload: { ...offer.payload, target } };
+    expect(parseMessage(v8Release.decodeEnvelope(JSON.stringify(offerWithoutTier)))).toEqual(offerWithoutTier);
   });
 
   it('the published decoder reads the exported HTTP corpus and decodes each eligible entry', () => {

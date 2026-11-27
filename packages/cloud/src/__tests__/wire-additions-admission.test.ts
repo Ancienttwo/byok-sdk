@@ -189,6 +189,8 @@ async function deviceWith(capabilities: readonly string[], payload?: Record<stri
     const { harnessId, selection } = target;
     const capabilities: HarnessInfo['capabilities'] = {
       selectionModes: [selection.mode], effort: target.effort !== undefined,
+      ...(target.serviceTier === undefined ? {} : { serviceTier: true }),
+      ...(target.serviceTierFallback === undefined ? {} : { serviceTierFallback: true }),
       ...(selection.mode === 'byok' ? { byokProviderId: selection.providerId } : {}),
     };
     const executor = { id: harnessId, capabilities };

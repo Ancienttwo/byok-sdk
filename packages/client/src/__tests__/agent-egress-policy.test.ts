@@ -56,6 +56,15 @@ describe('Agent egress goes to the Host as is', () => {
     expect(controller.projectLatestValue({ agentRef, taskId: 'task-error-kept', events: [progress, error, artifact] })).toEqual([error, artifact]);
   });
 
+  it('carries the latest applied tier in a batch alongside ordinary progress', () => {
+    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY, tenantId: 'tenant-egress' });
+    const first = { type: 'service_tier', serviceTier: 'fast' } as const;
+    const tier = { type: 'service_tier', serviceTier: 'default' } as const;
+    const progress = { type: 'progress', text: 'running' } as const;
+    expect(controller.projectLatestValue({ agentRef, taskId: 'task-tier', events: [first, tier, progress] })).toEqual([tier, progress]);
+    expect(controller.status().latestValue).toMatchObject({ replaced: 1, dropped: 0 });
+  });
+
   it('counts as coalesced only the accepted events it does not send', () => {
     const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY, tenantId: 'tenant-egress' });
     const first = { type: 'error', message: 'first failure' } as const;

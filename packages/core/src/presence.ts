@@ -37,6 +37,8 @@ export interface PresenceRuntimeCapabilities {
   readonly selectionModes: readonly string[];
   readonly defaultModelModes?: readonly ('byok' | 'adapter-model' | 'byok-profile')[];
   readonly effort: boolean;
+  readonly serviceTier?: boolean;
+  readonly serviceTierFallback?: boolean;
   readonly byokProviderId?: string;
   readonly isolation?: {
     readonly userInstructions?: boolean;
@@ -77,6 +79,7 @@ export function freezePresenceHarnessFact(runtime: PresenceHarnessFact): Presenc
       selectionModes: Object.freeze([...capabilities.selectionModes]),
       ...(capabilities.defaultModelModes === undefined ? {} : { defaultModelModes: Object.freeze([...capabilities.defaultModelModes]) }),
       effort: capabilities.effort,
+      ...definedFlags(capabilities, ['serviceTier', 'serviceTierFallback']),
       ...(capabilities.byokProviderId === undefined ? {} : { byokProviderId: capabilities.byokProviderId }),
       ...(capabilities.isolation === undefined ? {} : {
         isolation: Object.freeze(definedFlags(capabilities.isolation, ['userInstructions', 'userOutputStyle', 'userMemory', 'userSkills', 'userHookContext', 'userMcpServers', 'sessionPersistence'])),

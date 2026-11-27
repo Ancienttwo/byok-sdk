@@ -6,6 +6,7 @@
 - **Changed (client, #2521).** The client vendors OAR 0.138.1 and qualifies Antigravity CLI 1.5.18. `AgyAdapter.accountUsage()` requires `{ allowPrintMode: true }` to run its quota commands. agy subprocesses use `AGY_CLI_DISABLE_AUTO_UPDATE=true`. [Host steps](docs/releases/host-upgrade-next-minor.md#oar-01381-2521)
 - **Fixed (client, #2521).** Codex secret answers are scrubbed from the matching native output before SDK recording and projection.
 - **Added (client, #2524).** Hosts can check installed runtime versions offline against OAR's suggested minimums for recent models. Hosts control any live manifest refresh. [Host steps](docs/releases/host-upgrade-next-minor.md#suggested-runtime-versions-2524)
+- **Added (client, protocol, #2523).** Hosts can select a Codex or Claude service tier and authorize default-tier fallback on wire v8. Both adapters verify the applied tier before dispatching the prompt and report it in task activity. [Host steps](docs/releases/host-upgrade-next-minor.md#host-selected-service-tier-2523)
 
 - **Changed (client, #2512).** The client vendors OAR 0.136.0 (from 0.131.0). OpenCode 2.x `listModels()` reads the full catalog from a private loopback listener, and `effortLevels` drops OpenCode's `default` variant. Antigravity usage window labels drop the trailing "Remaining". [Host steps](docs/releases/host-upgrade-next-minor.md#oar-01360-2512-2513)
 - **Fixed (client, #2512).** `ClaudeAdapter` declines MCP elicitation requests instead of hanging an unattended task or ending a `nativeInteractions` task.

@@ -26,7 +26,8 @@ export interface OarStartErrorClasses {
 
 export function oarStartClassifier(classes: OarStartErrorClasses): RuntimeStartClassifier {
   return (error) => {
-    if (error instanceof classes.UnsupportedOptionError && error.option === 'effort') {
+    if (error instanceof classes.UnsupportedOptionError
+      && (error.option === 'effort' || error.option === 'serviceTier' || error.option === 'serviceTierFallback')) {
       return { retry: 'non-retryable', failure: { class: 'invalid_request' } };
     }
     if (error instanceof classes.ModelConfirmationError) {

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "304ddf3e3d29f941adcb9a080026fb23ad3b9d6bb0de3b8145a10e61ffef6dc7"
+    "snapshotSha256": "f93782113914748213544ca864f3fbcd963696d515138f7c114a4bcba38075c7"
   },
   "configFields": {
     "status": "tracked",
@@ -73,6 +73,48 @@
         "export:@byok-sdk/client#parseSuggestedRuntimeVersions",
         "export:@byok-sdk/client#suggestedRuntimeVersions"
       ]
+    },
+    {
+      "id": "harness-service-tier",
+      "impact": "additive",
+      "summary": "Wire v8 Hosts can request a service tier and authorize default-tier fallback on Codex and Claude. Check device and harness support, and read the applied tier in task activity.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-selected-service-tier-2523",
+      "items": [
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client#RuntimeOperationManifest",
+        "export:@byok-sdk/client#RuntimeTaskInput",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+        "export:@byok-sdk/cloud#ActivityAppendRequestSchema",
+        "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#TimelineEventSchema",
+        "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+        "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
+        "export:@byok-sdk/protocol#AgentEventSchema",
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#ConnHelloPayload",
+        "export:@byok-sdk/protocol#ExecutionTargetSchema",
+        "export:@byok-sdk/protocol#HARNESS_SERVICE_TIER_CAPABILITY",
+        "export:@byok-sdk/protocol#HARNESS_SERVICE_TIER_MAX_LENGTH",
+        "export:@byok-sdk/protocol#HARNESS_SERVICE_TIER_TOKEN",
+        "export:@byok-sdk/protocol#HarnessInfo",
+        "export:@byok-sdk/protocol#HarnessInventorySchema",
+        "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
+        "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#TaskProgressPayloadSchema",
+        "export:@byok-sdk/protocol#harnessSupportsTarget",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_MAX_LENGTH",
+        "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_TOKEN",
+        "union:agent-event#service_tier"
+      ]
     }
   ],
   "changes": [
@@ -85,6 +127,21 @@
       "item": "export:@byok-sdk/client#RuntimeAdapter",
       "change": "changed",
       "entry": "antigravity-account-usage-options"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeTaskInput",
+      "change": "changed",
+      "entry": "harness-service-tier"
     },
     {
       "item": "export:@byok-sdk/client#SUGGESTED_RUNTIME_VERSIONS_URL",
@@ -147,9 +204,159 @@
       "entry": "antigravity-account-usage-options"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ActivityAppendRequestSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TimelineEventSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
       "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
       "change": "changed",
       "entry": "pi-161-closure"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEventSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ConnHelloPayload",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ExecutionTargetSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HARNESS_SERVICE_TIER_CAPABILITY",
+      "change": "added",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HARNESS_SERVICE_TIER_MAX_LENGTH",
+      "change": "added",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HARNESS_SERVICE_TIER_TOKEN",
+      "change": "added",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInfo",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInventorySchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskProgressPayloadSchema",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#harnessSupportsTarget",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_CAPABILITY",
+      "change": "added",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_MAX_LENGTH",
+      "change": "added",
+      "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_TOKEN",
+      "change": "added",
+      "entry": "harness-service-tier"
     },
     {
       "item": "store:pi-durable",
@@ -157,6 +364,11 @@
       "before": "@earendil-works/pi-durable@1.6.0",
       "after": "@earendil-works/pi-durable@1.6.1",
       "entry": "pi-161-closure"
+    },
+    {
+      "item": "union:agent-event#service_tier",
+      "change": "added",
+      "entry": "harness-service-tier"
     }
   ]
 }

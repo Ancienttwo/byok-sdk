@@ -12,7 +12,7 @@ import {
   TaskSealingSchema,
   sealedOfferRule,
 } from './sealed-payload.js';
-import { AgentEventOrUnknownSchema } from './agent-event.js';
+import { AgentEventOrUnknownSchema, ServiceTierSchema } from './agent-event.js';
 import {
   AgentContentActorSchema,
   AgentContentDecodeAsSchema,
@@ -155,6 +155,8 @@ export const HarnessInfoSchema = z.object({
       .refine(modes => new Set(modes).size === modes.length, 'duplicate selection mode'),
     defaultModelModes: z.array(DefaultModelSelectionModeSchema).max(DefaultModelSelectionModeSchema.options.length).optional(),
     effort: z.boolean(),
+    serviceTier: z.boolean().optional(),
+    serviceTierFallback: z.boolean().optional(),
     byokProviderId: HarnessIdSchema.optional(),
   }).refine(caps => caps.selectionModes.includes('byok') === (caps.byokProviderId !== undefined),
     'byok requires one provider id')
@@ -361,6 +363,10 @@ export const ExecutionTargetSchema = z.discriminatedUnion('lane', [
     harnessId: HarnessIdSchema,
     selection: HarnessSelectionSchema,
     effort: ReasoningEffortSchema.optional(),
+    serviceTier: ServiceTierSchema.optional(),
+    serviceTierFallback: z.literal('default').optional(),
+  }).refine(target => target.serviceTierFallback === undefined || target.serviceTier !== undefined, {
+    path: ['serviceTierFallback'], message: 'serviceTierFallback requires serviceTier',
   }),
 ]);
 export type ExecutionTarget = z.infer<typeof ExecutionTargetSchema>;
@@ -371,6 +377,8 @@ export function harnessSupportsTarget(
     readonly selectionModes: readonly SelectionMode[];
     readonly defaultModelModes?: readonly DefaultModelSelectionMode[];
     readonly effort: boolean;
+    readonly serviceTier?: boolean;
+    readonly serviceTierFallback?: boolean;
     readonly byokProviderId?: string;
   } },
   target: ExecutionTarget,
@@ -380,6 +388,8 @@ export function harnessSupportsTarget(
   const { selection } = target;
   return harness.id === target.harnessId && capabilities.selectionModes.includes(selection.mode)
     && (target.effort === undefined || capabilities.effort)
+    && (target.serviceTier === undefined || capabilities.serviceTier === true)
+    && (target.serviceTierFallback === undefined || capabilities.serviceTierFallback === true)
     && (selection.mode !== 'byok' || selection.providerId === capabilities.byokProviderId)
     && !harnessSelectionNeedsModel(selection, capabilities.defaultModelModes);
 }

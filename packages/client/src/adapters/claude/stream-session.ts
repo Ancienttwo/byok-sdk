@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
-import type { RuntimeInputImage } from '../../types.js';
+import type { RuntimeInputImage, RuntimeTaskInput } from '../../types.js';
+import { projectedServiceTier } from '../shared-rules.js';
 import type { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import {
   claudeSessionCapabilities, claudeProjectionProfile, initialClaudeProjection, resumedClaudeProjection, streamJsonSession,
+  claudeServiceTierRefusal, claudeServiceTierEvents,
   type ClaudeControl, type ClaudeCredentialRedactor, type ClaudeRecord, type RawClaudeSession,
 } from '../../runtime/claude-session-runtime.js';
 import { claudeRecordFrame, type ClaudeFrame, type ClaudeStreamMessage } from './projection.js';
@@ -19,11 +21,11 @@ type OwnedLineProcess = ReturnType<ReturnType<typeof createOwnedLineProcessSpawn
 /** One runtime request: the native `control_request` and the recorded reply writer. */
 export type ClaudeAppRequest = (message: ClaudeStreamMessage, respond: (reply: Record<string, unknown>) => Promise<void>) => void;
 
-export interface ClaudeStreamSessionOptions {
+type ClaudeExecutionOptions = Pick<RuntimeTaskInput, 'effort' | 'serviceTier' | 'serviceTierFallback'>;
+
+export interface ClaudeStreamSessionOptions extends ClaudeExecutionOptions {
   /** The requested `--resume` id; a fresh session learns its id from `system/init`. */
   resume?: string;
-  /** Exact reasoning effort passed to the child as `--effort`. */
-  effort?: string;
   /** The kernel's retention limit: past it the oldest native payloads are elided. */
   maxRetainedBytes: number;
   /** `initialize` with these SDK callback hooks; absent when no native control is in use. */
@@ -50,8 +52,17 @@ export class ClaudeStreamSession {
   hooksApplied: boolean | undefined;
   #raw: RawClaudeSession | undefined;
   redactDiagnostic = (text: string): string => this.credentials.redact(text);
-  #effort: string | undefined;
-  get effort(): string | undefined { return this.#effort; }
+  #executionOptions: ClaudeExecutionOptions = {};
+  get effort() { return this.#executionOptions.effort; }
+  get serviceTier() { return this.#executionOptions.serviceTier; }
+  get serviceTierFallback() { return this.#executionOptions.serviceTierFallback; }
+  #initialServiceTier: ReturnType<typeof projectedServiceTier>;
+
+  takeInitialServiceTier(): ReturnType<typeof projectedServiceTier> {
+    const tier = this.#initialServiceTier;
+    this.#initialServiceTier = undefined;
+    return tier;
+  }
   #inputWrites: Promise<void>[] | undefined;
   #withdraw!: NonNullable<RawClaudeSession['withdraw']>;
   /** Input ids of the follow-ups OAR holds for after a Claude-own turn; an interrupt withdraws them first. */
@@ -73,7 +84,8 @@ export class ClaudeStreamSession {
 
   /** Spawn and adoption settle before the first protocol write; the open writes `initialize` when asked. */
   async open(options: ClaudeStreamSessionOptions): Promise<void> {
-    this.#effort = options.effort;
+    const { effort, serviceTier, serviceTierFallback } = options;
+    this.#executionOptions = { effort, serviceTier, serviceTierFallback };
     await this.child.spawned;
     // A start halted during adoption writes nothing to the adopted process.
     if (this.#fatal !== undefined) throw this.#fatal;
@@ -110,10 +122,18 @@ export class ClaudeStreamSession {
       steer: false,
       consume: message => this.#consume(message),
       open: async () => {
-        if (options.initialize === undefined) return;
-        const response = await this.#control({ subtype: 'initialize', hooks: options.initialize.hooks }, INITIALIZE_TIMEOUT_MS);
+        if (options.initialize === undefined && serviceTier === undefined) return;
+        const response = await this.#control({ subtype: 'initialize', hooks: options.initialize?.hooks ?? null }, INITIALIZE_TIMEOUT_MS);
         if (response?.subtype !== 'success') {
           throw new RuntimeExecutionFailure({ phase: 'start', retry: 'retryable', reason: 'Claude native control initialization failed', failure: this.startupExit() });
+        }
+        if (serviceTier !== undefined) {
+          const refusal = claudeServiceTierRefusal(serviceTier, { response }, serviceTierFallback);
+          if (refusal !== null) throw new RuntimeExecutionFailure({
+            phase: 'start', retry: 'non-retryable', reason: this.credentials.redact(refusal), failure: { class: 'invalid_request' },
+          });
+          const applied = this.credentials.redactValue(response.response) as Record<string, unknown> | undefined;
+          this.#initialServiceTier = applied === undefined ? undefined : projectedServiceTier(claudeServiceTierEvents(applied));
         }
         const applied = (response.response as { hooks_applied?: unknown } | undefined)?.hooks_applied;
         this.hooksApplied = typeof applied === 'boolean' ? applied : undefined;
