@@ -55,6 +55,7 @@ import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-execu
 import { resolveManagedRuntime } from '../managed-runtime-path.js';
 import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities.js';
 import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version.js';
+import { compareRuntimeSemver } from '../../runtime/compare-runtime-semver.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 import { codexUserMcpServerNames, verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers.js';
 import { assertCodexFileCredentials, createCodexAgentHome } from './agent-user-context.js';
@@ -69,9 +70,10 @@ export const codexProbeTimeouts = probeTimeouts({
   version: DETECT_VERSION_TIMEOUT_MS, appServerHelp: APP_SERVER_HELP_TIMEOUT_MS, authStatus: AUTH_STATUS_TIMEOUT_MS,
 });
 const DEFAULT_OPERATION_MS = 30_000;
+type VerifiedCodexInstallation = { readonly invocation: RuntimeInvocation; readonly version: string };
 type CodexInstallation =
   | { readonly detected: Exclude<RuntimeDetectResult, { kind: 'available' }> }
-  | { readonly detected: Extract<RuntimeDetectResult, { kind: 'available' }>; readonly invocation: RuntimeInvocation };
+  | (VerifiedCodexInstallation & { readonly detected: Extract<RuntimeDetectResult, { kind: 'available' }> });
 const SUBSCRIPTION_REQUIRED = 'Codex subscription selection requires a ChatGPT login';
 type CodexLaunchInput = Parameters<NonNullable<PreparedRuntimeOperation['resolveRuntimeLaunch']>>[0];
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
@@ -107,7 +109,7 @@ export interface CodexAdapterOptions {
    * Default 30000. On expiry the session fails and the app-server is killed.
    */
   operationTimeoutMs?: number;
-  /** Opt-in local Host UI; independent of the remote boolean approval lane. */
+  /** Opt-in local Host UI. Requires a verified Codex version of 0.107.0 or later. */
   nativeInteractions?: NativeInteractionHostOptions;
   /**
    * For an Agent task (`task.offer`), `excluded` gives the Codex
@@ -157,6 +159,7 @@ export interface CodexAdapterOptions {
 const READER_PROJECT_ROOT_ARGS = Object.freeze(['-c', 'project_root_markers=[".byok"]']);
 const DISABLE_PLUGINS_ARGS = ['-c', 'features.plugins=false'] as const;
 const DISABLE_MEMORIES_ARGS = ['-c', 'features.memories=false'] as const;
+const NATIVE_INTERACTIONS_MINIMUM_VERSION = '0.107.0';
 const DEFAULT_MODE_USER_INPUT_ARGS = ['-c', 'features.default_mode_request_user_input=true'] as const;
 
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
@@ -287,14 +290,15 @@ export class CodexAdapter implements RuntimeAdapter {
         // Any other end, such as an unreadable credential store, leaves auth presence unconfirmed.
         authPresent = login.kind === 'ok';
       }
-      return { invocation, detected: bindVerifiedDetection(this, {
+      const verified: VerifiedCodexInstallation = { invocation, version: text };
+      return { ...verified, detected: bindVerifiedDetection(this, {
         kind: 'available' as const,
         sessionCapabilities: codexRuntime.codexSessionCapabilities(),
         version: text,
         ...(authPresent === undefined ? {} : { authPresent }),
         ...runtimeExecutableFields(resolved, host.platform === 'win32' ? executable : named),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, codexVersionToken(text)),
-      }, invocation) };
+      }, verified) };
     } catch (error) {
       signal?.throwIfAborted();
       return { detected: classifyDetectError(error) };
@@ -318,23 +322,36 @@ export class CodexAdapter implements RuntimeAdapter {
     input.signal?.throwIfAborted();
     // This offer's admission observation, when this adapter verified it, carries
     // the invocation its probes ran; otherwise probe now and launch what that probe ran.
-    const verified = takeVerifiedDetection<RuntimeInvocation>(this, input.detected);
+    const verified = takeVerifiedDetection<VerifiedCodexInstallation>(this, input.detected);
     const installation: CodexInstallation = verified === undefined
       ? await this.detectInstallation({ checkAuth: false, signal: input.signal })
-      : { invocation: verified, detected: input.detected as Extract<RuntimeDetectResult, { kind: 'available' }> };
+      : { ...verified, detected: input.detected as Extract<RuntimeDetectResult, { kind: 'available' }> };
     const { detected } = installation;
     if (!('invocation' in installation))
       return {
         kind: 'reject',
+        ...(this.options.nativeInteractions === undefined ? {} : { code: 'runtime_unavailable' as const }),
         reason: `codex installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`,
         // A probe deadline is no verdict on the installation.
         retryable: detected.kind === 'timeout',
       };
-    const mcpAllowlistSupported = supportsCodexMcpToolAllowlist(installation.detected.version);
+    const { invocation, version, detected: { executableSource, versionVerdict } } = installation;
+    if (this.options.nativeInteractions !== undefined) {
+      const order = compareRuntimeSemver(codexVersionToken(version), NATIVE_INTERACTIONS_MINIMUM_VERSION);
+      if (order === null || order < 0) {
+        const detail = order === null ? 'the installed version could not be confirmed' : 'the installed version is below the minimum';
+        return {
+          kind: 'reject',
+          code: 'runtime_unavailable',
+          reason: `Codex nativeInteractions requires Codex ${NATIVE_INTERACTIONS_MINIMUM_VERSION} or later (${detail})`,
+          retryable: false,
+        };
+      }
+    }
+    const mcpAllowlistSupported = supportsCodexMcpToolAllowlist(version);
     if (!mcpAllowlistSupported && (input.requiredToolsetIds.length > 0 || Object.keys(input.mcpServers ?? {}).length > 0)) {
       return { kind: 'reject', reason: CODEX_MCP_TOOL_ALLOWLIST_REFUSAL, retryable: false };
     }
-    const { invocation, detected: { version, executableSource, versionVerdict } } = installation;
     let admittedLaunch: CodexAppServerLaunch | undefined;
     return {
       kind: 'prepared',

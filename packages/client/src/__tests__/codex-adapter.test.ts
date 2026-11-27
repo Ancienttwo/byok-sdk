@@ -235,6 +235,35 @@ describe('Codex persistent app-server adapter', () => {
     expect(commands).toEqual([probed]);
   });
   const prepareInput = (runtime: CodexAdapter) => ({ offer: { target: CODEX_TARGET, instruction: 'hello' }, descriptor: runtime.descriptor, requiredToolsetIds: [] });
+  it.each([
+    ['codex-cli 0.105.0', 'below the minimum'],
+    ['codex-cli 0.106.0', 'below the minimum'],
+    ['codex-cli 0.107.0-rc.1', 'below the minimum'],
+    ['codex-cli development', 'could not be confirmed'],
+    ['', 'could not be confirmed'],
+  ])('refuses native interactions during prepare for version output %j', async (version, detail) => {
+    vi.stubEnv('FAKE_CODEX_VERSION', version);
+    const runtime = adapter({ nativeInteractions: { onRequest: vi.fn() } });
+    const detected = await observeAdmissionDetection(runtime);
+    expect(detected).toMatchObject({ kind: 'available', version });
+    const refusal = {
+      kind: 'reject', code: 'runtime_unavailable', retryable: false,
+      reason: expect.stringContaining(detail),
+    };
+    expect(await runtime.prepare({ ...prepareInput(runtime), detected })).toEqual(refusal);
+    expect(await runtime.prepare({ ...prepareInput(runtime), detected: { kind: 'available', version: 'codex-cli 0.169.0' } })).toEqual(refusal);
+  });
+  it.each(['codex-cli 0.105.0', 'codex-cli 0.106.0', 'codex-cli development'])(
+    'keeps warn-only admission and starts with native interactions unset for %j', async version => {
+      vi.stubEnv('FAKE_CODEX_VERSION', version);
+      const runtime = adapter();
+      const detected = await observeAdmissionDetection(runtime);
+      expect(detected).toMatchObject({ kind: 'available', version, versionVerdict: { state: 'warn' } });
+      const session = await open(runtime, task, { ...await ctx(), detected });
+      expect(session.interactions).toBeUndefined();
+      expect((await turn(session)).at(-1)).toEqual({ type: 'turn_end' });
+    },
+  );
   it('#2468: an `app-server --help` past its deadline is a timeout in detect and a retryable prepare refusal', async () => {
     vi.stubEnv('FAKE_CODEX_APP_SERVER_HELP_HANG', '1');
     const runtime = adapter();
