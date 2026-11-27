@@ -65,6 +65,14 @@ import { assertEmbeddedInputImages, createImageUploads, InputImageUploadError } 
 export { InputImageUploadError } from './input-images.js';
 import { approvePendingApproval, createTaskHandle, noteAbandoned, rejectPendingApproval } from './task-handle.js';
 import { readTaskEvents, type TaskEventDeps, type TaskEventFacts, type TaskEventSources } from './task-events.js';
+import { registerHostMcpTaskContext, resolveHostMcpTaskContext } from './task-assertion.js';
+export { HostMcpTaskAssertionError, verifyHostMcpTaskAssertion } from './task-assertion.js';
+export type {
+  HostMcpTaskAssertionErrorCode,
+  HostMcpTaskContextOptions,
+  VerifyHostMcpTaskAssertionInput,
+} from './task-assertion.js';
+export type { AuthenticatedTaskAssertion, DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import type {
   ByokServerEvent,
   AgentContentReadRequest,
@@ -406,6 +414,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   assertMaintenanceInterval(maintenanceIntervalMs);
   const maintenanceLimit = opts.maintenance?.limit ?? DEFAULT_MAINTENANCE_LIMIT;
   if (!Number.isSafeInteger(maintenanceLimit) || maintenanceLimit < 1 || maintenanceLimit > 5000) throw new ByokCloudError('maintenance_invalid_input', 'Maintenance limit must be from 1 to 5000.');
+  const taskContext = resolveHostMcpTaskContext(opts.hostMcpTaskContext);
   const startedAtMs = Date.now();
   const tenant = serverTenantId(opts.productId);
   const maxBlobSizeBytes = opts.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES;
@@ -441,7 +450,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     );
 
   const projectionWaiters = new ProjectionWaiters();
-  // The declaration is derived from the ports passed, so the two cannot drift (#1096).
+  // The declaration is derived from the ports and opt-in task context switch, so the two cannot drift (#1096).
   const ports = { blobContentProxy: composition.blobContentProxy };
   const uploadInputImage = createImageUploads(composition, tenant, Math.min(INPUT_IMAGE_MAX_BYTES, maxBlobSizeBytes));
   const cloud: ByokCloud = createByokCloud({
@@ -449,10 +458,15 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     cloud: composition.cloud,
     ...ports,
     proofReceiptRetention: { authority: composition.proofReceiptAuthority },
+    ...(taskContext === undefined ? {} : { deviceAssertionReplay: taskContext.replay }),
     crypto: composition.crypto,
     tokenSigner,
     clock: composition.clock,
-    capabilities: capabilityDeclarationForPorts(ports),
+    capabilities: capabilityDeclarationForPorts(
+      ports,
+      1,
+      taskContext === undefined ? undefined : { includeHostMcpTaskContext: true },
+    ),
     // S1: the product this instance serves is part of every bearer-authed
     // route's decision, not just of the pairing claims.
     instanceProductId: opts.productId,
@@ -715,7 +729,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       .then(() => undefined);
   }
 
-  return {
+  const server: ByokServer = {
     wakes: {
       schedule: input => wakes.schedule(input),
       cancel: key => wakes.cancel(key),
@@ -969,4 +983,20 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       };
     },
   };
+
+  if (taskContext !== undefined) {
+    registerHostMcpTaskContext(server, {
+      tenant,
+      productId: opts.productId,
+      devices: composition.cloud.devices,
+      crypto: composition.crypto,
+      clock: composition.clock,
+      replay: taskContext.replay,
+      cloud,
+      isClosed: () => readShutdown.signal.aborted,
+      track,
+    });
+  }
+
+  return server;
 }

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "f93782113914748213544ca864f3fbcd963696d515138f7c114a4bcba38075c7"
+    "snapshotSha256": "77ebe075543c1c9124999f538c8c78040c17925968707d1ac382a286c08c75cb"
   },
   "configFields": {
     "status": "tracked",
@@ -114,6 +114,23 @@
         "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_MAX_LENGTH",
         "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_TOKEN",
         "union:agent-event#service_tier"
+      ]
+    },
+    {
+      "id": "server-host-mcp-task-context",
+      "impact": "additive",
+      "summary": "@byok-sdk/server adds the off-by-default CreateByokServerOptions.hostMcpTaskContext switch and verifyHostMcpTaskAssertion (with HostMcpTaskAssertionError) to declare host-mcp-task-context via @byok-sdk/cloud capabilityDeclarationForPorts and verify spec §8.2(2) and §8.2(3) in one fail-closed entry.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2559",
+      "items": [
+        "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
+        "export:@byok-sdk/server#AuthenticatedTaskAssertion",
+        "export:@byok-sdk/server#CreateByokServerOptions",
+        "export:@byok-sdk/server#DeviceAssertionReplayAuthority",
+        "export:@byok-sdk/server#HostMcpTaskAssertionError",
+        "export:@byok-sdk/server#HostMcpTaskAssertionErrorCode",
+        "export:@byok-sdk/server#HostMcpTaskContextOptions",
+        "export:@byok-sdk/server#VerifyHostMcpTaskAssertionInput",
+        "export:@byok-sdk/server#verifyHostMcpTaskAssertion"
       ]
     }
   ],
@@ -232,6 +249,11 @@
       "item": "export:@byok-sdk/cloud#TimelineEventSchema",
       "change": "changed",
       "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
+      "change": "changed",
+      "entry": "server-host-mcp-task-context"
     },
     {
       "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
@@ -357,6 +379,46 @@
       "item": "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_TOKEN",
       "change": "added",
       "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/server#AuthenticatedTaskAssertion",
+      "change": "added",
+      "entry": "server-host-mcp-task-context"
+    },
+    {
+      "item": "export:@byok-sdk/server#CreateByokServerOptions",
+      "change": "changed",
+      "entry": "server-host-mcp-task-context"
+    },
+    {
+      "item": "export:@byok-sdk/server#DeviceAssertionReplayAuthority",
+      "change": "added",
+      "entry": "server-host-mcp-task-context"
+    },
+    {
+      "item": "export:@byok-sdk/server#HostMcpTaskAssertionError",
+      "change": "added",
+      "entry": "server-host-mcp-task-context"
+    },
+    {
+      "item": "export:@byok-sdk/server#HostMcpTaskAssertionErrorCode",
+      "change": "added",
+      "entry": "server-host-mcp-task-context"
+    },
+    {
+      "item": "export:@byok-sdk/server#HostMcpTaskContextOptions",
+      "change": "added",
+      "entry": "server-host-mcp-task-context"
+    },
+    {
+      "item": "export:@byok-sdk/server#VerifyHostMcpTaskAssertionInput",
+      "change": "added",
+      "entry": "server-host-mcp-task-context"
+    },
+    {
+      "item": "export:@byok-sdk/server#verifyHostMcpTaskAssertion",
+      "change": "added",
+      "entry": "server-host-mcp-task-context"
     },
     {
       "item": "store:pi-durable",

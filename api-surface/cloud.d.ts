@@ -1420,7 +1420,7 @@ export type CapabilityPortName = (typeof CAPABILITY_PORTS)[keyof typeof CAPABILI
 export type CapabilityPorts = Pick<ByokCloudOptions, Exclude<CapabilityPortName, 'cloud.e2eeMember'>> & {
     readonly cloud?: Pick<CloudStores, 'e2eeMember'>;
 };
-export declare function capabilityDeclarationForPorts(ports: CapabilityPorts, version?: number): CapabilityDeclaration;
+export declare function capabilityDeclarationForPorts(ports: CapabilityPorts, version?: number, options?: Pick<FullCapabilityDeclarationOptions, 'includeHostMcpTaskContext'>): CapabilityDeclaration;
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====

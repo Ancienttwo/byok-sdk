@@ -190,15 +190,22 @@ function portsServe(ports: CapabilityPorts, capability: keyof typeof CAPABILITY_
 
 /**
  * The declaration a composition's ports back: every standard capability, each
- * port-bound capability exactly when all of its ports are present, and never
- * `host-mcp-task-context`, which no port can prove (§8.2(1)).
+ * port-bound capability exactly when all of its ports are present, and
+ * `host-mcp-task-context` only when the composition explicitly opts in via
+ * `options.includeHostMcpTaskContext` (§8.2(1): no cloud port alone proves
+ * the host verifies task assertions end to end).
  */
-export function capabilityDeclarationForPorts(ports: CapabilityPorts, version = 1): CapabilityDeclaration {
+export function capabilityDeclarationForPorts(
+  ports: CapabilityPorts,
+  version = 1,
+  options: Pick<FullCapabilityDeclarationOptions, 'includeHostMcpTaskContext'> = {},
+): CapabilityDeclaration {
   const full = fullCapabilityDeclaration(version, {
     includeTruthRecords: portsServe(ports, CLOUD_CAPABILITIES.truthRecords),
     includeSkillPacks: portsServe(ports, CLOUD_CAPABILITIES.skillPacks),
     includeAgentMemoryProjection: portsServe(ports, CLOUD_CAPABILITIES.agentMemoryProjection),
     includeE2eeMember: portsServe(ports, CLOUD_CAPABILITIES.e2eeMember),
+    ...(options.includeHostMcpTaskContext === true ? { includeHostMcpTaskContext: true } : {}),
   });
   return portsServe(ports, CLOUD_CAPABILITIES.blobsContentProxy)
     ? full

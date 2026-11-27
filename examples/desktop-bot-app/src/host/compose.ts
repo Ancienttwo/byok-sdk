@@ -143,6 +143,14 @@ function hostingOf(options: SdkHostingOptions | undefined): SdkHosting | undefin
 const launcherOf = (hosting: SdkHosting | undefined, hostStorageRoot: string) =>
   (hosting ? { piByokLauncher: piByokLauncher(hosting.daemon.sdkHelperHost, hostStorageRoot) } : {});
 
+/**
+ * The single task-assertion audience the desktop Host mints and verifies for
+ * its widget host toolset (ADR-053 D5). Imported by the widget toolset and
+ * Host verification path rather than duplicated or exported from a public SDK
+ * package.
+ */
+export const WIDGET_TOOLSET_AUDIENCE = 'byok-desktop-widgets' as const;
+
 /** The DaemonConfig the Host runs its daemon with; `serverUrl` is the embedded server's loopback URL. */
 function hostDaemonConfig(options: Pick<HostCompositionOptions, 'productId' | 'productName' | 'storeDir' | 'hostStorageRoot' | 'releaseVersion'>,
   hosting: SdkHosting | undefined, serverUrl: string): DaemonConfig {
@@ -157,6 +165,7 @@ function hostDaemonConfig(options: Pick<HostCompositionOptions, 'productId' | 'p
     // K8 projects each Bot's persona into its Agent home; without it no Bot becomes ready.
     agentHome: { hostStorageRoot: options.hostStorageRoot, projection: createBotPersonaProjection() },
     agentEgress: { policy: AGENT_EGRESS_POLICY },
+    deviceAssertion: { audiences: [WIDGET_TOOLSET_AUDIENCE] },
     localAgentRelease: { version: options.releaseVersion },
     ...hosting?.daemon,
     ...launcherOf(hosting, options.hostStorageRoot),
@@ -192,6 +201,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
   const server = createByokServer({
     productId: options.productId, storage: { kind: 'sqlite', path: serverDb },
     wake: late.wake, agentMessage: late.agentMessage,
+    hostMcpTaskContext: { enabled: true },
   });
   const listener = await listenLoopback({
     portStore: filePortStore(path.join(hostDir, 'loopback-port')),

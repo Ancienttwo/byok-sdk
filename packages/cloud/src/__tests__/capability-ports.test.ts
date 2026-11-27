@@ -99,4 +99,12 @@ describe('capability declaration ⇄ ports, both directions (#1096)', () => {
       expect(capabilityDeclarationForPorts(row.ports).capabilities).toContain(row.capability);
     }
   });
+
+  it('derives host-mcp-task-context only when includeHostMcpTaskContext is explicitly true', () => {
+    expect(capabilityDeclarationForPorts({}, 1, { includeHostMcpTaskContext: false }).capabilities)
+      .not.toContain(CLOUD_CAPABILITIES.hostMcpTaskContext);
+    const enabled = capabilityDeclarationForPorts({}, 1, { includeHostMcpTaskContext: true });
+    expect(enabled.capabilities).toContain(CLOUD_CAPABILITIES.hostMcpTaskContext);
+    expect(() => cloudWith(enabled, {})).not.toThrow();
+  });
 });

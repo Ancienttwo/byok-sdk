@@ -42,5 +42,25 @@ describe('createByokServer capability declaration', () => {
         await server.close();
       }
     });
+
+    it(`declares host-mcp-task-context when hostMcpTaskContext is enabled (${name})`, async () => {
+      const selected = storage();
+      const server = createByokServer({
+        productId: 'capability-test',
+        hostMcpTaskContext: { enabled: true },
+        ...(selected === undefined ? {} : { storage: selected }),
+      });
+      try {
+        const response = await server.hono.request('/byok/capabilities');
+        expect(response.status).toBe(200);
+        const declared = await response.json() as { capabilities: string[] };
+        expect(declared).toEqual(
+          JSON.parse(JSON.stringify(capabilityDeclarationForPorts({ blobContentProxy: {} as never }, 1, { includeHostMcpTaskContext: true }))),
+        );
+        expect(declared.capabilities).toContain(CLOUD_CAPABILITIES.hostMcpTaskContext);
+      } finally {
+        await server.close();
+      }
+    });
   }
 });
