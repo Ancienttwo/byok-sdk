@@ -130,6 +130,7 @@ export const workspaceGraph = {
       "@byok-sdk/client",
       "@byok-sdk/core",
       "@byok-sdk/keys",
+      "@byok-sdk/protocol",
       "@byok-sdk/server",
       "@byok-sdk/ui-runtime"
     ]
