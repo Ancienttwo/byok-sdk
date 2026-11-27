@@ -264,9 +264,9 @@ describe('Codex persistent app-server adapter', () => {
       expect((await turn(session)).at(-1)).toEqual({ type: 'turn_end' });
     },
   );
-  it('#2468: an `app-server --help` past its deadline is a timeout in detect and a retryable prepare refusal', async () => {
+  it.each([false, true])('#2468: app-server help timeout is a retryable prepare refusal with native interactions set to %s', async enabled => {
     vi.stubEnv('FAKE_CODEX_APP_SERVER_HELP_HANG', '1');
-    const runtime = adapter();
+    const runtime = adapter(enabled ? { nativeInteractions: { onRequest: vi.fn() } } : {});
     codexProbeTimeouts.override(runtime, { appServerHelp: 200 });
     expect(await runtime.detect()).toEqual({ kind: 'timeout' });
     expect(await runtime.prepare(prepareInput(runtime)))

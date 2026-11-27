@@ -1574,8 +1574,10 @@ receive a new generation and cannot answer the old process's requests.
   are refused as unsupported. The adapter launches Codex with
   `-c features.default_mode_request_user_input=true`, so questions reach the
   Host outside plan mode; that needs Codex 0.107.0 or later (0.106.0 asks but
-  never resolves the request, 0.105.0 ignores the flag). Questions preserve native
-  question IDs and answer arrays. Exact active-turn and resume-thread checks
+  never resolves the request, 0.105.0 ignores the flag). With `nativeInteractions`
+  configured, `prepare()` rejects older versions or unrecognized version output
+  with `runtime_unavailable`. Questions preserve native question IDs and answer
+  arrays. Exact active-turn and resume-thread checks
   precede Host callbacks. Permissions profiles, dynamic tools and MCP
   elicitation remain unsupported.
 - Native response writes have bounded acknowledged transport ownership.

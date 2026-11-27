@@ -330,7 +330,6 @@ export class CodexAdapter implements RuntimeAdapter {
     if (!('invocation' in installation))
       return {
         kind: 'reject',
-        ...(this.options.nativeInteractions === undefined ? {} : { code: 'runtime_unavailable' as const }),
         reason: `codex installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`,
         // A probe deadline is no verdict on the installation.
         retryable: detected.kind === 'timeout',
