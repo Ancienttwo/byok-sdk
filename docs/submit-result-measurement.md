@@ -258,7 +258,7 @@ This table lists only what the SDK code or a fixture shows.
 | --- | --- | --- | --- |
 | Pi | `submit_result`. Pi registers the SDK helper tool with its bare name, not the qualified `mcp__<server>__<tool>` name | Absent (inferred from code). The adapter sets `mcp` only for a qualified host-toolset name. No fixture covers this | `isError` is always present. A Pi frame without it stops the task |
 | Claude | Unknown. The adapter copies the CLI `tool_use.name`. The CLI convention `mcp__<server>__<tool>` would give `mcp__byokagentresult__submit_result`. This is not verified | Absent (inferred from code). The adapter sets `mcp` only for host toolsets | `isError` appears only if the CLI sends a boolean `is_error`. A `tool_result` with no earlier `tool_use` gets the tool name `unknown` |
-| Codex | `mcp_tool_call`. The call is named in `input.server` and `input.tool` (`byokagentresult` and `submit_result` in the fixture) | Present. The adapter copies the native `server` and `tool` fields | No `isError` field. Read `output.status` (`failed`), `output.error`, and `output.result` |
+| Codex | `mcp_tool_call`. `tool_use.input` is the raw MCP arguments object | Present. The adapter copies the native `server` and `tool` fields | `isError` is always present (`true` when `status !== 'completed'`, an error is reported, or `result.isError === true`). `output` is the MCP `CallToolResult` (`{ content, structuredContent? }`) |
 | Grok | Unknown. The adapter copies the ACP `tool_call_started.tool` value | Absent | `isError: true` only when the native `result` is `failed`. At turn end the SDK closes unclosed calls with a `tool_result` that has no `isError` |
 
 Sources:

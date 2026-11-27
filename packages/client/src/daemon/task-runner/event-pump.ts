@@ -9,7 +9,7 @@ import { spillOversizedEvent } from '../event-spill.js';
 import { ProgressEventTooLargeError } from '../progress-batcher.js';
 import type { ActiveTask } from './support.js';
 import { classifyToolCall, describeHighRiskToolCall, type ToolCall } from '../../tool-authorization.js';
-import { attributeHubAttempt, projectPiHubError } from '../../mcp/hub-event-attribution.js';
+import { attributeHubAttempt } from '../../mcp/hub-event-attribution.js';
 import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, agentMessageSealing, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage, taskFinalizing, taskTearingDown, taskMessageAccepted, taskMessageSendAttempted } from './support.js';
 import type { TaskRunner } from '../task-runner.js';
 import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state.js';
@@ -56,8 +56,6 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
         // `all` classifies the full attempted input before any spill and only
         // reminds. `auto` already gates calls before dispatch.
         if (active.toolAuthorization.default === 'all') noteToolReminder.call(this, active, event, hubAttempt);
-      } else if (event.type === 'tool_result' && active.mcpHub !== undefined && active.adapter.descriptor.id === 'pi') {
-        event = projectPiHubError(event);
       }
 
       // DaemonConfig.maxInlineEventBytes: bound this ONE event before it is

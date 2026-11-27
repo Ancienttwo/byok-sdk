@@ -2,6 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { ConversationView, EntryRecord, LiveState, ToolSlot } from '@earendil-works/pi-durable';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import { servedModelName } from '../served-model.js';
+import { mcpCallToolResultOutput } from '../shared-rules.js';
 
 /** What the durable lane reports from one change of the conversation view. */
 export type DurableEvent =
@@ -122,7 +123,20 @@ export class DurableViewProjection {
 export function withMcpIdentity(event: AgentEvent, identities: McpEventIdentities): AgentEvent {
   if (event.type !== 'tool_use' && event.type !== 'tool_result') return event;
   const mcp = identities.get(event.tool);
-  return mcp === undefined ? event : { ...event, mcp };
+  if (mcp === undefined) return event;
+  if (event.type === 'tool_use') return { ...event, mcp };
+  const message = object(event.output);
+  const details = object(message.details);
+  let rawContent: unknown[] | undefined;
+  if (Array.isArray(details.rawContent)) rawContent = details.rawContent;
+  else if (Array.isArray(message.content)) rawContent = message.content;
+  const rawStructured = message.structuredContent !== undefined
+    ? message.structuredContent
+    : details.structuredContent;
+  const structuredContent = rawStructured === null ? undefined : rawStructured;
+  const hasPayload = rawContent !== undefined || structuredContent !== undefined;
+  const isError = event.isError === true || message.isError === true || details.isError === true || !hasPayload;
+  return { ...event, mcp, output: mcpCallToolResultOutput(rawContent, structuredContent), isError };
 }
 /** Run boundaries never complete a BYOK execution; the engine decides that after idle. */
 export function projectDurableEvent(event: DurableEvent): AgentEvent[] {

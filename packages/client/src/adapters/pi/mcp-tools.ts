@@ -31,6 +31,8 @@ export interface PiMcpToolDefinition {
     signal: AbortSignal | undefined,
   ): Promise<{
     content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>;
+    structuredContent?: unknown;
+    isError?: boolean;
     details: PiMcpToolDetails;
   }>;
 }
@@ -40,6 +42,8 @@ export interface PiMcpToolDetails {
   readonly serverName: string;
   readonly toolName: string;
   readonly isError: boolean;
+  readonly structuredContent?: unknown;
+  readonly rawContent?: readonly unknown[];
 }
 
 /** How a registered Pi tool reaches its MCP server. */
@@ -75,17 +79,24 @@ function promptSnippet(tool: McpToolProjection): string {
  */
 function renderContent(
   result: CallToolResult,
-): Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> {
+): {
+  content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>;
+  altered: boolean;
+} {
   const blocks: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [];
+  let altered = !Array.isArray(result.content);
   for (const block of result.content ?? []) {
     if (block.type === 'text') {
+      if (Object.keys(block).length > 2) altered = true;
       blocks.push({ type: 'text', text: block.text });
       continue;
     }
     if (block.type === 'image') {
+      if (Object.keys(block).length > 3) altered = true;
       blocks.push({ type: 'image', data: block.data, mimeType: block.mimeType });
       continue;
     }
+    altered = true;
     const uri = (block as { uri?: unknown; resource?: { uri?: unknown } }).uri
       ?? (block as { resource?: { uri?: unknown } }).resource?.uri;
     blocks.push({
@@ -94,10 +105,14 @@ function renderContent(
     });
   }
   if (result.structuredContent !== undefined) {
+    altered = true;
     blocks.push({ type: 'text', text: JSON.stringify(result.structuredContent) });
   }
-  if (blocks.length === 0) blocks.push({ type: 'text', text: '[MCP returned no content]' });
-  return blocks;
+  if (blocks.length === 0) {
+    altered = true;
+    blocks.push({ type: 'text', text: '[MCP returned no content]' });
+  }
+  return { content: blocks, altered };
 }
 
 /**
@@ -141,13 +156,19 @@ export function createPiMcpTools(
         ? {}
         : params as Record<string, unknown>;
       const result = await host.call(tool, args, signal);
+      const rendered = renderContent(result);
+      const rawContent = Array.isArray(result.content) ? result.content : [];
       return {
-        content: renderContent(result),
+        content: rendered.content,
+        ...(result.structuredContent === undefined ? {} : { structuredContent: result.structuredContent }),
+        ...(result.isError === true ? { isError: true } : {}),
         details: Object.freeze({
           toolsetId: tool.toolsetId,
           serverName: tool.serverName,
           toolName: tool.toolName,
           isError: result.isError === true,
+          ...(result.structuredContent === undefined ? {} : { structuredContent: result.structuredContent }),
+          ...(rendered.altered ? { rawContent } : {}),
         }),
       };
     },

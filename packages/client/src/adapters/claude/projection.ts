@@ -1,4 +1,4 @@
-import { BASE_CONTENT_TYPES, objectRecord as object, projectProviderContext, projectedServiceTier } from '../shared-rules.js';
+import { BASE_CONTENT_TYPES, mcpCallToolResultOutput, objectRecord as object, projectProviderContext, projectedServiceTier } from '../shared-rules.js';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -272,6 +272,33 @@ function mapAssistant(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation)
  * as `unknown` regardless, so a future array shape still round-trips
  * correctly without a mapping change.
  */
+function normalizeClaudeMcpContent(blockContent: unknown): unknown[] | undefined {
+  if (Array.isArray(blockContent)) return blockContent;
+  if (typeof blockContent === 'string') return [{ type: 'text', text: blockContent }];
+  return undefined;
+}
+
+function projectClaudeMcpToolResult(
+  blockContent: unknown,
+  toolUseResult: unknown,
+  blockIsError: boolean | undefined,
+): { output: Record<string, unknown>; isError: boolean | undefined } {
+  const result = object(toolUseResult);
+  let content: unknown[] | undefined;
+  if (Array.isArray(result?.content)) content = result.content;
+  else if (Array.isArray(toolUseResult)) content = toolUseResult;
+  else content = normalizeClaudeMcpContent(blockContent);
+  const structuredContent = result?.structuredContent !== undefined && result.structuredContent !== null
+    ? result.structuredContent
+    : undefined;
+  const hasPayload = content !== undefined || structuredContent !== undefined;
+  const isError = blockIsError === true || result?.isError === true || !hasPayload ? true : blockIsError;
+  return {
+    output: mcpCallToolResultOutput(content, structuredContent),
+    isError,
+  };
+}
+
 function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, options: MapClaudeMessageOptions): MapClaudeMessageResult {
   const message = msg.message as { content?: unknown } | undefined;
   const content = message?.content;
@@ -279,6 +306,7 @@ function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, opti
 
   const events: AgentEvent[] = [];
   let unmappedLabel: string | undefined;
+  const toolResultCount = content.filter((raw) => (raw as { type?: unknown } | null)?.type === 'tool_result').length;
 
   for (const raw of content) {
     const block = raw as { type?: unknown; tool_use_id?: unknown; content?: unknown; is_error?: unknown };
@@ -294,10 +322,27 @@ function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, opti
     // local use frame remains explicitly unpaired; it is never matched by
     // name or by output content.
     const tool = correlation.toolNameByUseId.get(block.tool_use_id) ?? 'unknown';
+    const mcp = correlation.mcpIdentities?.get(tool);
     const isError = typeof block.is_error === 'boolean' ? block.is_error : undefined;
+    if (mcp !== undefined) {
+      const projected = projectClaudeMcpToolResult(
+        block.content,
+        toolResultCount === 1 ? msg.tool_use_result : undefined,
+        isError,
+      );
+      const event: Extract<AgentEvent, { type: 'tool_result' }> = {
+        type: 'tool_result',
+        mcp,
+        tool,
+        output: projected.output,
+        toolCallId: block.tool_use_id,
+      };
+      if (projected.isError !== undefined) event.isError = projected.isError;
+      events.push(event);
+      continue;
+    }
     const event: Extract<AgentEvent, { type: 'tool_result' }> = {
       type: 'tool_result',
-      ...(correlation.mcpIdentities?.get(tool) === undefined ? {} : { mcp: correlation.mcpIdentities.get(tool)! }),
       tool,
       output: { content: block.content },
       toolCallId: block.tool_use_id,

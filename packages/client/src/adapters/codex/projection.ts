@@ -1,4 +1,4 @@
-import { BASE_CONTENT_TYPES as contentTypes, objectRecord as record, projectedServiceTier } from '../shared-rules.js';
+import { BASE_CONTENT_TYPES as contentTypes, mcpCallToolResultOutput, objectRecord as record, projectedServiceTier } from '../shared-rules.js';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
@@ -196,15 +196,24 @@ export class CodexProjection {
       const events: AgentEvent[] = [];
       if (status === 'interrupted') {
         for (const active of state.active.values())
-          events.push({
-            type: 'tool_result',
-            ...active,
-            output: {
-              status: 'interrupted',
-              reason:
-                'closed after turn interruption; runtime did not report item completion',
-            },
-          });
+          events.push(
+            active.mcp !== undefined || active.tool === 'mcp_tool_call'
+              ? {
+                  type: 'tool_result',
+                  ...active,
+                  isError: true,
+                  output: mcpCallToolResultOutput(undefined),
+                }
+              : {
+                  type: 'tool_result',
+                  ...active,
+                  output: {
+                    status: 'interrupted',
+                    reason:
+                      'closed after turn interruption; runtime did not report item completion',
+                  },
+                },
+          );
       }
       state.active.clear();
       if (state.lastUsage) events.push(state.lastUsage);
@@ -274,20 +283,37 @@ export class CodexProjection {
         : item.type === 'fileChange'
           ? { changes }
           : item.type === 'mcpToolCall'
-            ? {
-                server: item.server,
-                tool: item.tool,
-                arguments: item.arguments,
-              }
+            ? item.arguments
             : { query: item.query };
     const mcp = item.type === 'mcpToolCall' && typeof item.server === 'string' && item.server.length > 0
       && typeof item.tool === 'string' && item.tool.length > 0 ? { server: item.server, tool: item.tool } : undefined;
     const identity = { ...attribution, ...(mcp === undefined ? {} : { mcp }) };
     if (started) {
       state.active.set(activeKey, { tool, toolCallId, ...identity });
-      return [{ type: 'tool_use', tool, toolCallId, input: inputValue, ...identity }];
+      return [{ type: 'tool_use', tool, toolCallId, ...(inputValue === undefined ? {} : { input: inputValue }), ...identity }];
     }
     state.active.delete(activeKey);
+    if (item.type === 'mcpToolCall') {
+      const result = record(item.result);
+      const content = Array.isArray(result?.content) ? result.content : undefined;
+      const structuredContent =
+        result?.structuredContent !== undefined && result.structuredContent !== null
+          ? result.structuredContent
+          : undefined;
+      const hasPayload = content !== undefined || structuredContent !== undefined;
+      const isError = item.status !== 'completed'
+        || (item.error !== undefined && item.error !== null)
+        || result?.isError === true
+        || !hasPayload;
+      return [{
+        type: 'tool_result',
+        tool,
+        toolCallId,
+        output: mcpCallToolResultOutput(content, structuredContent),
+        isError,
+        ...identity,
+      }];
+    }
     const output =
       item.type === 'commandExecution'
         ? {
@@ -298,9 +324,7 @@ export class CodexProjection {
           }
         : item.type === 'fileChange'
           ? { changes, status: item.status }
-          : item.type === 'mcpToolCall'
-            ? { result: item.result, error: item.error, status: item.status }
-            : { query: item.query, status: item.status };
+          : { query: item.query, status: item.status };
     const events: AgentEvent[] = [
       { type: 'tool_result', tool, toolCallId, output, ...identity },
     ];

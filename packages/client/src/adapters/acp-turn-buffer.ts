@@ -1,13 +1,69 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { BufferedToolUse } from './buffered-tool-use.js';
-import { accumulateUsage, objectRecord as record, projectProviderContext } from './shared-rules.js';
+import { accumulateUsage, mcpCallToolResultOutput, objectRecord as record, projectProviderContext } from './shared-rules.js';
 
 type Usage = Extract<AgentEvent, { type: 'usage' }>;
 type Emit = (event: AgentEvent) => void;
+type McpIdentity = { server: string; tool: string };
+
+/** Convert OAR's normalized `ToolOutputPart[]` back to MCP `CallToolResult.content` items. */
+function normalizeOarToolContent(content: unknown): unknown[] {
+  if (!Array.isArray(content)) return [];
+  return content.map((item) => {
+    const part = record(item);
+    if (part === undefined) return item;
+    if (part.type === 'image' && typeof part.data === 'string' && typeof part.mediaType === 'string') {
+      return { type: 'image', data: part.data, mimeType: part.mediaType };
+    }
+    if (part.type === 'other' && Object.hasOwn(part, 'value')) {
+      return part.value;
+    }
+    return item;
+  });
+}
+
+function unwrapAcpContentItems(items: readonly unknown[]): unknown[] {
+  return items.map((item) => {
+    const wrapper = record(item);
+    return wrapper?.type === 'content' && record(wrapper.content) !== undefined ? wrapper.content : item;
+  });
+}
+
+function projectAcpMcpToolResult(
+  event: Record<string, unknown>,
+  update: Record<string, unknown> | undefined,
+): { output: Record<string, unknown>; isError: boolean } {
+  const rawOutput = record(update?.rawOutput);
+  const rawIsCallResult = rawOutput !== undefined
+    && (Array.isArray(rawOutput.content) || rawOutput.structuredContent !== undefined);
+  const statusFailed = event.result === 'failed'
+    || update?.status === 'failed'
+    || update?.status === 'cancelled';
+  const isError = statusFailed || rawOutput?.isError === true;
+
+  let content: unknown[];
+  if (rawIsCallResult && Array.isArray(rawOutput.content)) {
+    content = rawOutput.content;
+  } else if (Array.isArray(update?.content)) {
+    content = unwrapAcpContentItems(update.content);
+  } else if (Array.isArray(update?.rawOutput)) {
+    content = unwrapAcpContentItems(update.rawOutput);
+  } else if (typeof update?.rawOutput === 'string') {
+    content = [{ type: 'text', text: update.rawOutput }];
+  } else {
+    content = normalizeOarToolContent(event.content);
+  }
+
+  const structuredContent = rawIsCallResult ? rawOutput.structuredContent : undefined;
+  return {
+    output: mcpCallToolResultOutput(content, structuredContent),
+    isError,
+  };
+}
 
 export class AcpTurnBuffer {
   private text = '';
-  private readonly tools = new Map<string, string>();
+  private readonly tools = new Map<string, { tool: string; mcp?: McpIdentity }>();
   private readonly buffered = new BufferedToolUse();
   private billed?: Record<string, unknown>;
   private pending?: Usage;
@@ -25,7 +81,7 @@ export class AcpTurnBuffer {
     const observe = () => {
       if (updateId === undefined) return;
       const raw = record(update?.rawInput);
-      const tool = this.tools.get(updateId);
+      const tool = this.tools.get(updateId)?.tool;
       const input = raw === undefined || tool === undefined || options.input === undefined ? raw : options.input(tool, raw);
       this.buffered.observe(updateId, input, update?.rawInput !== undefined, events.some(value => record(value)?.kind === 'tool_call_input') || ['in_progress', 'completed', 'failed', 'cancelled'].includes(String(update?.status)), emit);
     };
@@ -43,8 +99,8 @@ export class AcpTurnBuffer {
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           this.flushText(emit);
           const toolCallId = qualify(event.callId);
-          this.tools.set(toolCallId, event.tool);
           const mcp = options.mcp?.(event.tool);
+          this.tools.set(toolCallId, { tool: event.tool, ...(mcp === undefined ? {} : { mcp }) });
           this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId, ...at, ...(mcp === undefined ? {} : { mcp }) });
           observe();
           break;
@@ -54,15 +110,24 @@ export class AcpTurnBuffer {
           this.flushText(emit);
           observe();
           const toolCallId = qualify(event.callId);
-          const tool = this.tools.get(toolCallId) ?? 'tool';
+          const tracked = this.tools.get(toolCallId);
+          const tool = tracked?.tool ?? 'tool';
           this.buffered.finish(toolCallId, emit);
           this.tools.delete(toolCallId);
-          const mcp = options.mcp?.(tool);
+          const mcp = tracked?.mcp ?? options.mcp?.(tool);
+          if (mcp !== undefined) {
+            const projected = projectAcpMcpToolResult(event, updateId === toolCallId ? update : undefined);
+            emit({
+              type: 'tool_result', tool, toolCallId, ...at, mcp,
+              output: projected.output,
+              ...(projected.isError ? { isError: true } : {}),
+            });
+            break;
+          }
           emit({
             type: 'tool_result', tool, toolCallId, ...at,
             output: { ...(event.content === undefined ? {} : { content: event.content }), ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode }) },
             ...(event.result === 'failed' ? { isError: true } : {}),
-            ...(mcp === undefined ? {} : { mcp }),
           });
           break;
         }
@@ -85,10 +150,21 @@ export class AcpTurnBuffer {
 
   end(emit: Emit, interrupted: boolean): void {
     this.flushText(emit);
-    for (const [toolCallId, tool] of this.tools) {
+    for (const [toolCallId, tracked] of this.tools) {
       this.buffered.finish(toolCallId, emit);
-      emit({ type: 'tool_result', tool, toolCallId, ...this.attribution,
-        output: { status: interrupted ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' } });
+      if (tracked.mcp !== undefined) {
+        emit({
+          type: 'tool_result', tool: tracked.tool, toolCallId, ...this.attribution,
+          mcp: tracked.mcp,
+          isError: true,
+          output: mcpCallToolResultOutput(undefined),
+        });
+        continue;
+      }
+      emit({
+        type: 'tool_result', tool: tracked.tool, toolCallId, ...this.attribution,
+        output: { status: interrupted ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' },
+      });
     }
     this.tools.clear();
   }

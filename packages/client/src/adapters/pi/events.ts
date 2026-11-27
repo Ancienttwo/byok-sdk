@@ -5,6 +5,28 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 import type { PiRpcMessage } from './rpc-client.js';
 import { servedModelName } from '../served-model.js';
+import { mcpCallToolResultOutput, objectRecord } from '../shared-rules.js';
+
+function projectPiMcpToolResult(
+  msgResult: unknown,
+  msgIsError: boolean,
+): { output: Record<string, unknown>; isError: boolean } {
+  const result = objectRecord(msgResult);
+  const details = objectRecord(result?.details);
+  let rawContent: unknown[] | undefined;
+  if (Array.isArray(details?.rawContent)) rawContent = details.rawContent;
+  else if (Array.isArray(result?.content)) rawContent = result.content;
+  const rawStructured = result?.structuredContent !== undefined
+    ? result.structuredContent
+    : details?.structuredContent;
+  const structuredContent = rawStructured === null ? undefined : rawStructured;
+  const hasPayload = rawContent !== undefined || structuredContent !== undefined;
+  const isError = msgIsError || result?.isError === true || details?.isError === true || !hasPayload;
+  return {
+    output: mcpCallToolResultOutput(rawContent, structuredContent),
+    isError,
+  };
+}
 
 function requireToolCallId(msg: PiRpcMessage): string {
   if (typeof msg.toolCallId === 'string' && msg.toolCallId.trim().length > 0) return msg.toolCallId;
@@ -151,15 +173,25 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage, identities?: McpEven
       const toolCallId = requireToolCallId(msg);
       const isError = requireToolResultOutcome(msg);
       if (typeof msg.toolName !== 'string') return undefined;
-      const event: Extract<AgentEvent, { type: 'tool_result' }> = {
+      const mcp = identities?.get(msg.toolName);
+      if (mcp === undefined) {
+        return {
+          type: 'tool_result',
+          tool: msg.toolName,
+          output: { result: msg.result },
+          toolCallId,
+          isError,
+        };
+      }
+      const projected = projectPiMcpToolResult(msg.result, isError);
+      return {
         type: 'tool_result',
-        ...(identities?.get(msg.toolName) === undefined ? {} : { mcp: identities.get(msg.toolName)! }),
+        mcp,
         tool: msg.toolName,
-        output: { result: msg.result },
+        output: projected.output,
         toolCallId,
-        isError,
+        isError: projected.isError,
       };
-      return event;
     }
 
     case 'agent_settled':

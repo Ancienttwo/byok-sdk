@@ -61,3 +61,21 @@ export function accumulateUsage(next: Usage, tokens: Record<string, unknown> | u
   }
   return tokens;
 }
+
+/**
+ * Canonical MCP `CallToolResult` output envelope (`{ content, structuredContent? }`).
+ * Always carries a `content` array (empty when the runtime produced no MCP payload)
+ * and omits `structuredContent` when absent or `null`.
+ */
+export function mcpCallToolResultOutput(
+  content: unknown[] | undefined,
+  structuredContent?: unknown,
+): { content: unknown[]; structuredContent?: unknown } {
+  const output: { content: unknown[]; structuredContent?: unknown } = {
+    content: content ?? [],
+  };
+  if (structuredContent !== undefined && structuredContent !== null) {
+    output.structuredContent = structuredContent;
+  }
+  return output;
+}
