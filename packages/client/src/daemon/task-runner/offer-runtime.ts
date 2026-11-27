@@ -71,8 +71,9 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     decline({ reason: 'selected execution lane does not support image input', code: 'bad_request', retryable: false });
     return undefined;
   }
-  if (preparation !== undefined && offered.effort !== undefined) {
-    decline({ reason: 'invalid_request: per-task effort cannot change a frozen prepared request', code: 'bad_request', retryable: false });
+  if (preparation !== undefined && (offered.effort !== undefined || offered.serviceTier !== undefined)) {
+    const option = offered.serviceTier === undefined ? 'effort' : 'service tier';
+    decline({ reason: `invalid_request: per-task ${option} cannot change a frozen prepared request`, code: 'bad_request', retryable: false });
     return undefined;
   }
   if (payload.nativeSessions !== undefined && pick.descriptor.memoryLane === undefined) {

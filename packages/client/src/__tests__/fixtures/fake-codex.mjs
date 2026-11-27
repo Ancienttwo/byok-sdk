@@ -368,7 +368,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const { id, method, params = {} } = frame;
   if (!method) return;
   if (method === 'initialize') {
-    send({ id, result: { userAgent: 'fake-codex' } });
+    send({ id, result: { userAgent: 'fake-codex/0.169.0' } });
     return;
   }
   if (method === 'account/read') {
@@ -386,6 +386,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (method === 'thread/start' || method === 'thread/resume') {
     if (process.env.FAKE_CODEX_HANG_BEFORE_THREAD === '1') return;
+    if (params.serviceTier === 'turbo') {
+      send({ id, error: { code: -32600, message: 'Invalid request: unknown variant `turbo`, expected one of `default`, `fast`, `flex`, `priority`' } });
+      return;
+    }
     threadFeatures = params.config?.features ?? {};
     // Session MCP servers arrive in the open's config; codex merges them into
     // the user's own config field by field.

@@ -124,16 +124,16 @@ export class ClaudeStreamSession {
       open: async () => {
         if (options.initialize === undefined && serviceTier === undefined) return;
         const response = await this.#control({ subtype: 'initialize', hooks: options.initialize?.hooks ?? null }, INITIALIZE_TIMEOUT_MS);
-        if (serviceTier !== undefined && response !== undefined) {
+        if (response?.subtype !== 'success') {
+          throw new RuntimeExecutionFailure({ phase: 'start', retry: 'retryable', reason: 'Claude native control initialization failed', failure: this.startupExit() });
+        }
+        if (serviceTier !== undefined) {
           const refusal = claudeServiceTierRefusal(serviceTier, { response }, serviceTierFallback);
           if (refusal !== null) throw new RuntimeExecutionFailure({
             phase: 'start', retry: 'non-retryable', reason: this.credentials.redact(refusal), failure: { class: 'invalid_request' },
           });
           const applied = this.credentials.redactValue(response.response) as Record<string, unknown> | undefined;
           this.#initialServiceTier = applied === undefined ? undefined : projectedServiceTier(claudeServiceTierEvents(applied));
-        }
-        if (response?.subtype !== 'success') {
-          throw new RuntimeExecutionFailure({ phase: 'start', retry: 'retryable', reason: 'Claude native control initialization failed', failure: this.startupExit() });
         }
         const applied = (response.response as { hooks_applied?: unknown } | undefined)?.hooks_applied;
         this.hooksApplied = typeof applied === 'boolean' ? applied : undefined;

@@ -550,8 +550,10 @@ function runProbeOrTurnFlow() {
       const { fastMode } = JSON.parse(readFileSync(argv[argv.indexOf('--settings') + 1], 'utf8'));
       if (typeof fastMode === 'boolean') {
         const state = process.env.FAKE_CLAUDE_TIER_READBACK ?? (fastMode ? 'on' : 'off');
-        send({ type: 'control_response', response: { subtype: 'success', request_id: msg.request_id,
-          response: state === 'missing' ? {} : { fast_mode_state: state } } });
+        const response = state === 'initialize-error'
+          ? { subtype: 'error', error: 'fixture initialization unavailable' }
+          : { subtype: 'success', response: state === 'missing' ? {} : { fast_mode_state: state } };
+        send({ type: 'control_response', response: { ...response, request_id: msg.request_id } });
         return;
       }
     }

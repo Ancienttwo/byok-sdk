@@ -1292,6 +1292,26 @@ describe('daemon shutdown waits for a prepared offer that is still inside start(
 });
 
 describe('every compared item declines by its own name, with no claim and no pin', () => {
+  it('declines a service tier on a frozen prepared request before adapter preparation', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const prepare = vi.spyOn(adapter, 'prepare');
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent, { adapters: [{
+      descriptor: { ...adapter.descriptor, supportsServiceTier: true },
+      detect: () => adapter.detect(), runtimeEnvironment: () => adapter.runtimeEnvironment(), prepare,
+    }] });
+    await runner.handleEnvelope(preparedOffer('prepared-tier', reference(built), 1, {
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' }, serviceTier: 'fast' },
+    }));
+    expect(declineOf(sent)).toEqual({
+      code: 'bad_request', reason: 'invalid_request: per-task service tier cannot change a frozen prepared request',
+    });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(sent.some(e => e.type === 'task.claim')).toBe(false);
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+  });
+
   interface Case {
     readonly name: string;
     readonly code: PreparedOfferDeclineCode;

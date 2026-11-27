@@ -488,6 +488,21 @@ describe('Codex persistent app-server adapter', () => {
     expect(gone(pids[0]!)).toBe(true);
   });
 
+  it.each([undefined, 'fake-thread-1'])('maps a Codex open RPC refusal of an unknown tier to invalid_request (resume=%s)', async sessionRef => {
+    const resources = await ctx();
+    const receipt = path.join(resources.workspaceDir, 'tier-rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    const { pids, spawnFn } = tracked();
+    const method = sessionRef === undefined ? 'thread/start' : 'thread/resume';
+    await expect(open(adapter({ spawnFn }), { ...task, serviceTier: 'turbo', sessionRef }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+      cause: { cause: { method, native: { code: -32600, message: expect.stringContaining('unknown variant `turbo`') } } },
+    });
+    expect(await fs.readFile(receipt, 'utf8')).not.toContain('turn/start');
+    expect(pids).toHaveLength(1);
+    expect(gone(pids[0]!)).toBe(true);
+  });
+
   it('refuses a manifest that changes the admitted tier before spawning Codex', async () => {
     const { pids, spawnFn } = tracked();
     const resources = await ctx();

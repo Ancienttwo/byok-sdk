@@ -564,6 +564,34 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
+  it('keeps a refused tier handshake retryable before prompting Claude', async () => {
+    const resources = await makeCtx({ ...process.env, FAKE_CLAUDE_TIER_READBACK: 'initialize-error' });
+    const receipt = path.join(resources.workspaceDir, 'prompt.txt');
+    resources.env.FAKE_CLAUDE_USER_RECEIPT = receipt;
+    try {
+      await expect(startAdapter(fakeClaudeAdapter(), { ...baseTask, serviceTier: 'fast' }, resources)).rejects.toMatchObject({
+        phase: 'start', retry: 'retryable', failure: { class: 'unknown' }, message: 'Claude native control initialization failed',
+      });
+      await expect(fs.stat(receipt)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an unsupported service tier before spawning Claude', async () => {
+    const spawnFn = vi.fn(() => { throw new Error('Claude must not spawn'); });
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn });
+    const resources = await makeCtx();
+    try {
+      await expect(startAdapter(adapter, { ...baseTask, serviceTier: 'turbo' }, resources)).rejects.toMatchObject({
+        phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' }, message: 'claude_service_tier_unsupported',
+      });
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('refuses a manifest that adds a tier fallback before spawning Claude', async () => {
     const spawnFn = vi.fn(() => { throw new Error('Claude must not spawn'); });
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn });

@@ -128,6 +128,8 @@ describe('runtime start failures', () => {
     [new SessionUnavailableError('id', 'in use', { ...details, reason: 'in_use' }), 'retryable', 'unknown', 'in use'],
     [new UnsupportedOptionError('model', 'unsupported'), 'non-retryable', 'unknown', 'unsupported'],
     [new UnsupportedOptionError('effort', 'effort refused'), 'non-retryable', 'invalid_request', 'effort refused'],
+    [new UnsupportedOptionError('serviceTier', 'tier refused'), 'non-retryable', 'invalid_request', 'tier refused'],
+    [new UnsupportedOptionError('serviceTierFallback', 'fallback refused'), 'non-retryable', 'invalid_request', 'fallback refused'],
     [new ModelConfirmationError('kept', { requested: 'a', reported: 'b' }), 'non-retryable', 'model_unavailable', 'model_rejected'],
     [new RuntimeFailureError('auth', 'login'), 'non-retryable', 'auth', 'login'],
     [new Error('exit'), 'retryable', 'runtime_exited', 'exit'],
