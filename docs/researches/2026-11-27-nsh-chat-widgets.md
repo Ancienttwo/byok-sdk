@@ -151,7 +151,7 @@ A host toolset server is a child process that the runtime starts. It learns its 
 | B. SDK-reserved helper on the `submit_result` model | A fifth reserved server in `packages/client/src/sdk-reserved-mcp.ts:30-48`, a helper bin like `bin/agent-result-mcp-server.ts:39-67` that forwards raw arguments over the daemon's control socket, and a `DaemonConfig` port through which the Host validates and resolves. | Needs no capability, because the daemon-local token is enough. But it puts a desktop product tool into the SDK's reserved protocol set, grows the `@byok-sdk/client` surface (`DaemonConfig`, the reserved-name tuple) and adds a second way to declare host tools next to the documented one. |
 | C. Host toolset without binding | The child validates locally and the Host projects from the observed `tool_use`. | Cannot resolve `snapshotRef` synchronously. The Host must validate again at projection because a runtime-reported `tool_use` is not proof the child saw it. Rejected. |
 
-The research recommends path A. It reuses the lane the SDK documents for exactly this case and keeps the widget catalog out of `packages/*`. It touches assertion verification, so ADR-053 records it as an owner decision (O1), not an ADR verdict. Either path adds a public-package slice that #2554 as written ("Host `render_widget` tool …") does not budget.
+The research recommends path A. It reuses the lane the SDK documents for exactly this case and keeps the widget catalog out of `packages/*`. It touches assertion verification, so it went to the owner. The owner chose path A on 2026-11-27 ([decision record](https://github.com/Ancienttwo/byok-sdk/issues/2553#issuecomment-7219557886)). The `@byok-sdk/server` slice is its own High-tier child, [#2559](https://github.com/Ancienttwo/byok-sdk/issues/2559), and it blocks #2554.
 
 ### 5.3 Where `snapshotRef` resolves
 
@@ -162,7 +162,7 @@ The research recommends path A. It reuses the lane the SDK documents for exactly
 - Every bundled adapter sets it today: claude (`adapters/claude/projection.ts:214`, `:300`), codex (`codex/projection.ts:24`), pi (`pi/mcp-tools.ts:29`), and grok, antigravity, dsh and opencode through the shared `adapters/acp-turn-buffer.ts:45-56`. So the Host can pair a `tool_use` with its `tool_result`.
 - The id is runtime metadata, though. No engine contract puts it in front of the model as something to copy.
 
-**What the model can name** is the tool it called and the arguments it passed. Recommended v1 shape (ADR-053 D5, owner confirmation O2):
+**What the model can name** is the tool it called and the arguments it passed. v1 shape (ADR-053 D5; the owner accepted it as O2):
 
 ```ts
 snapshotRef: { server: string; tool: string; input: Record<string, unknown>; pointer?: string }
@@ -183,7 +183,7 @@ Only host toolset (MCP) results qualify, so figures come only from Host-declared
 
 `render_widget` runs inside the Turn that called the data tool, so the result is still retained when it resolves. The Host therefore adds no tool-result table: it resolves from that one source. It copies only the validated snapshot into the widget record, which is the authority for the widget item (Host store, one row per `widgetId` with its current `rev`). The tail expires 10 minutes after the task, and the widget must outlive it.
 
-A reference to an earlier Turn's result would read a tail that may already be gone. v1 resolves within the calling task only (O3).
+A reference to an earlier Turn's result would read a tail that may already be gone. v1 resolves within the calling task only (O3, accepted by the owner).
 
 ### 5.4 Size limits and error codes
 
@@ -222,11 +222,13 @@ The cutover PR deletes `src/main/**`, `src/preload/**` and `src/renderer/**`. It
 - **#2557 needs no stub**, but it migrates one Electron call. Deleting `k8.answer` breaks the Electron `QuestionCard`, which calls it (`transcript.tsx:19`). #2557 changes that call to `k8.act` in the same PR. Electron never sends a widget action, because it shows no widget controls.
 - The merge order from the plan (2553, 2554, 2557, 2555, 2556) holds. A cutover that lands before #2554 or #2557 only removes their Electron lines.
 
-## 9. Open questions for the owner
+## 9. Owner questions and decisions
 
-1. **O1, task binding (authentication path).** Should the embedded `@byok-sdk/server` declare `host-mcp-task-context` and verify task assertions (path A, recommended), or should the SDK add a reserved widget helper (path B)? #2554 cannot return a synchronous resolution error to the model until one lands.
-2. **O2, `snapshotRef` shape.** Replace the mock's `{turnId, toolCallId}` with `{server, tool, input, pointer?}` (section 5.3)?
-3. **O3, cross-Turn references.** v1 resolves only within the calling task. Should a later Turn be able to chart an earlier Turn's data? That would need a Host-side copy of tool results, a second record.
-4. **O4, data-tool output contract.** The Host copies figures without mapping fields, so a finance data tool must return JSON whose value at `pointer` is the component's snapshot shape, in a result under the 64 KiB inline limit. Do the downstream finance tools already return that shape?
-5. **O5, updating a widget in place.** `handoff.md` has the Host stamp `rev` but names no model argument that targets an existing widget. ADR-053 proposes `replaces: <widgetId>`, to be checked against the export.
-6. **Q6** stays open until the artifact export lands in `_ops/widget-mock/artifact/`.
+The owner decided O1–O4 on 2026-11-27 ([decision record](https://github.com/Ancienttwo/byok-sdk/issues/2553#issuecomment-7219557886)).
+
+1. **O1, task binding (decided: path A).** `@byok-sdk/server` gets an explicit switch that declares `host-mcp-task-context` and verifies task assertions with the existing cloud verifier. The widget toolset child proves its task to the Host over loopback. The slice is [#2559](https://github.com/Ancienttwo/byok-sdk/issues/2559), which blocks #2554.
+2. **O2, `snapshotRef` shape (accepted).** `{server, tool, input, pointer?}` replaces the mock's `{turnId, toolCallId}` (section 5.3).
+3. **O3, cross-Turn references (accepted).** v1 resolves a `snapshotRef` only inside the calling task.
+4. **O4, data-tool output contract (decided).** The downstream finance data tools will be adapted to return snapshot-shaped JSON under the 64 KiB inline limit. The Host copies and never maps.
+5. **O5 (open), updating a widget in place.** `handoff.md` has the Host stamp `rev` but names no model argument that targets an existing widget. ADR-053 proposes `replaces: <widgetId>`, to be checked against the export.
+6. **Q6 (open)** stays open until the artifact export lands in `_ops/widget-mock/artifact/`.

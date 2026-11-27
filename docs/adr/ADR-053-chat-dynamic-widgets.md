@@ -9,9 +9,9 @@ appliesTo:
 
 # ADR-053：对话动态 widget（Proposed）
 
-> **来源与追踪**：总 issue [#2552](https://github.com/Ancienttwo/byok-sdk/issues/2552)，本 ADR 由调研子 issue [#2553](https://github.com/Ancienttwo/byok-sdk/issues/2553) 产出，约束后续子 issue [#2554](https://github.com/Ancienttwo/byok-sdk/issues/2554)（Host 工具、校验、解析、条目投影）、[#2555](https://github.com/Ancienttwo/byok-sdk/issues/2555)（base 目录渲染）、[#2556](https://github.com/Ancienttwo/byok-sdk/issues/2556)（finance 目录渲染）、[#2557](https://github.com/Ancienttwo/byok-sdk/issues/2557)（交互方法）。承接 [ADR-052](./ADR-052-desktop-native-ui-nsh-mixed.md)（NSH Mixed、D2 能力集、D3 Host/UI 边界、D6 UI 层规范）。
+> **来源与追踪**：总 issue [#2552](https://github.com/Ancienttwo/byok-sdk/issues/2552)，本 ADR 由调研子 issue [#2553](https://github.com/Ancienttwo/byok-sdk/issues/2553) 产出，约束后续子 issue [#2554](https://github.com/Ancienttwo/byok-sdk/issues/2554)（Host 工具、校验、解析、条目投影）、[#2555](https://github.com/Ancienttwo/byok-sdk/issues/2555)（base 目录渲染）、[#2556](https://github.com/Ancienttwo/byok-sdk/issues/2556)（finance 目录渲染）、[#2557](https://github.com/Ancienttwo/byok-sdk/issues/2557)（交互方法），以及 O1 裁定后拆出的 [#2559](https://github.com/Ancienttwo/byok-sdk/issues/2559)（`@byok-sdk/server` 的 task-context 声明与断言验证，阻塞 #2554）。承接 [ADR-052](./ADR-052-desktop-native-ui-nsh-mixed.md)（NSH Mixed、D2 能力集、D3 Host/UI 边界、D6 UI 层规范）。
 > **依据文档**：[NSH 对话 widget 调研](../researches/2026-11-27-nsh-chat-widgets.md)（下称「调研」），基线 `main@18b963e8a`，NSH pin `2964346`。
-> **状态说明**：`proposed`。晋升 `accepted` 的前提：Owner 回答 §5 的 O1–O5，且 owner 的 artifact 导出落盘后补齐 D7 的 spec v1 组件类型与开放问题裁定。
+> **状态说明**：`proposed`。Owner 已于 2026-11-27 裁定 §5 的 O1–O4（[决议记录](https://github.com/Ancienttwo/byok-sdk/issues/2553#issuecomment-7219557886)）。晋升 `accepted` 的前提：owner 的 artifact 导出落盘后，补齐 D7 的 spec v1 组件类型与开放问题裁定，并裁定 O5。
 > **#2552 已定、本 ADR 不再讨论的事项**：widget 是纯数据，由 `nsh-app/src/ui` 的固定目录渲染，不新增 D2 能力；只有一个保留工具 `render_widget`；finance 数值走 snapshotRef，不由模型传数；Host 在所属边界校验一次，非法规格 fail closed；未知组件或版本渲染显式的不支持卡片；条目 kind 为 `widget`，key `w<id>`，带 `rev`；草稿按 widgetId 存在 store；一个交互方法推广 `k8.answer`，带幂等 actionKey；不允许掩码或秘密输入；链接只经 `links.ts`；规格与渲染器无关。
 
 ## 1. 背景
@@ -73,10 +73,10 @@ appliesTo:
 - **声明**：`render_widget` 是桌面 Host 配置的一个 task-scoped host MCP toolset（`docs/spec.md:2715-2734`）。Host 在 `DaemonConfig.mcpToolsets` 中登记它，stdio server 是 Host 二进制的一个 argv 模式。K8 每个 Bot 的执行模板在 `requiredToolsets` 中带上它的 id，并经 `readOnlyToolsets` 声明为只读（`packages/bot-collaboration/src/host.ts:63-64`）：该工具只写 Host 自己的 transcript，不触达外部系统。
   - 现有全部 adapter 都声明 `mcpToolsets: true`（claude、codex、pi、antigravity、opencode、dsh、grok），所以不需要逐引擎代码。不支持 `mcpToolsets` 的引擎在准入时被拒，没有无工具的回退（`docs/spec.md:2733-2734`）。
 - **把调用绑定到 task**：校验结果要同步返回模型，解析 snapshotRef 要知道调用属于哪个 task，两者都要求子进程证明自己的 task。SDK 为此提供 task-context 通道：daemon 追加 context file，子进程用 `requestTaskAssertion` 换取断言，Host 验证（`docs/spec.md:2575-2618`）。嵌入式 `@byok-sdk/server` 的能力声明从不包含 `host-mcp-task-context`（`packages/server/src/index.ts:455`，`packages/cloud/src/capabilities.ts:191-196`），所以当前桌面 Host 拿不到 nonce。
-  - 推荐**路径 A**：`@byok-sdk/server` 增加显式开关，声明 `host-mcp-task-context` 并用 cloud 已有的组合验证断言（`packages/cloud/src/auth/device-assertion.ts:95`）。桌面 Host 的 toolset 子进程经 loopback 把参数与断言交给 Host，Host 校验、解析并作答。
-  - 备选**路径 B**：在 `packages/client` 增加第五个 SDK 保留 helper，照 `submit_result` 的方式经 daemon control socket 转发（`packages/client/src/bin/agent-result-mcp-server.ts:39-67`）。它不需要该能力，但会把桌面产品工具放进 SDK 保留协议，并在已有的 host toolset 机制旁边形成第二种声明方式。
-  - 两条路径都动公开包。路径 A 触及断言验证这一认证路径，由 Owner 裁定（§5 O1），本 ADR 不代为决定。#2554 的范围须相应加入一个公开包切片，或拆出独立子 issue。
-- **snapshotRef 形状**：mock 的 `{ turnId, toolCallId }` 不可行。模型看不到 K8 turnId；`toolCallId` 在事件中是可选字段（`packages/protocol/src/agent-event.ts:86`、`:97`）；现有 adapter 都会设置它（claude、codex、pi 各自设置，grok、antigravity、dsh、opencode 经共用的 `adapters/acp-turn-buffer.ts:45-56`），Host 可以据此配对 `tool_use` 与 `tool_result`，但它是运行时元数据，没有任何引擎承诺把它作为可复制的内容给模型。v1 采用模型能写出的内容（Owner 确认，§5 O2）：
+  - **路径 A（Owner 已选定，O1）**：`@byok-sdk/server` 增加显式开关，声明 `host-mcp-task-context` 并用 cloud 已有的组合验证断言（`packages/cloud/src/auth/device-assertion.ts:95`）。桌面 Host 的 toolset 子进程经 loopback 把参数与断言交给 Host，Host 校验、解析并作答。
+  - *（未采用）路径 B*：在 `packages/client` 增加第五个 SDK 保留 helper，照 `submit_result` 的方式经 daemon control socket 转发（`packages/client/src/bin/agent-result-mcp-server.ts:39-67`）。它不需要该能力，但会把桌面产品工具放进 SDK 保留协议，并在已有的 host toolset 机制旁边形成第二种声明方式。
+  - 路径 A 触及公开包中的断言验证这一认证路径。按 Owner 决议，`@byok-sdk/server` 的切片作为独立的 High 级子 issue [#2559](https://github.com/Ancienttwo/byok-sdk/issues/2559) 先行落地，并阻塞 #2554。
+- **snapshotRef 形状**：mock 的 `{ turnId, toolCallId }` 不可行。模型看不到 K8 turnId；`toolCallId` 在事件中是可选字段（`packages/protocol/src/agent-event.ts:86`、`:97`）；现有 adapter 都会设置它（claude、codex、pi 各自设置，grok、antigravity、dsh、opencode 经共用的 `adapters/acp-turn-buffer.ts:45-56`），Host 可以据此配对 `tool_use` 与 `tool_result`，但它是运行时元数据，没有任何引擎承诺把它作为可复制的内容给模型。v1 采用模型能写出的内容（Owner 已确认，O2）：
 
   ```ts
   snapshotRef: { server: string; tool: string; input: Record<string, unknown>; pointer?: string }
@@ -85,10 +85,10 @@ appliesTo:
 - **解析规则**（只在发起调用的同一 task 内）：
   1. 在该 task 的 `tool_use` 事件中找 `mcp` 等于 `{server, tool}` 且 `input` 深相等的那一条。必须恰好一条：零条报 `snapshot_ref_unresolved`，多条报 `snapshot_ref_ambiguous`。
   2. 按 `toolCallId` 配对 `tool_result`。缺 id、`isError` 或输出被 spill 成预览报 `snapshot_ref_unavailable`。inline 上限缺省 64 KiB（`packages/client/src/daemon/event-spill.ts:15`、`:238`），并受 server 活动预算限制（`task-runner.ts:663`），超过它的数据工具结果不能作为来源。某个引擎的事件若缺 `toolCallId`，该引擎上的 finance widget 按此规则 fail closed；base widget 不用 snapshotRef，不受影响。
-  3. 输出解析为 JSON，取 `pointer`（RFC 6901，缺省为根）处的值，按组件的 snapshot schema 校验，失败报 `snapshot_invalid`。Host 只复制、不做字段映射（§5 O4）。
+  3. 输出解析为 JSON，取 `pointer`（RFC 6901，缺省为根）处的值，按组件的 snapshot schema 校验，失败报 `snapshot_invalid`。Host 只复制、不做字段映射（O4：下游 finance 数据工具将改为返回 snapshot 形状、小于 64 KiB 的 JSON）。
   - 只有 host toolset（MCP）结果可作来源，数值只来自 Host 声明的数据工具，不来自 shell 等原生工具。
 - **等待**：daemon 每 250 ms 批量上送进度（`packages/client/src/daemon/progress-batcher.ts:65`），`render_widget` 可能早于数据工具的 `tool_result` 到达 server。Host 在 `server.tasks.events(taskId)` 上等待匹配的那一对，最长 5 s，超时报 `snapshot_ref_unresolved`；该 feed 由本实例的提交唤醒（`packages/server/src/index.ts:275-280`）。
-- **记录位置**：工具结果的唯一来源是 SDK 已保存的 task 活动尾部 `server.tasks.activity(taskId)`（`packages/server/src/index.ts:263-269`），Host 的 activity 卡片已在读取它（`src/host/activity/domain.ts:64`）。上限为 1000 条、4 MiB，task 结束后保留 10 分钟（`packages/cloud/src/activity.ts:8-10`）。`render_widget` 与数据工具在同一 Turn 内调用，解析时结果仍在。Host 不新建工具结果表，只把校验后的 snapshot 复制进 D2 的 widget 记录：活动尾部会过期，widget 要比它活得久。跨 Turn 引用不在 v1（§5 O3）。
+- **记录位置**：工具结果的唯一来源是 SDK 已保存的 task 活动尾部 `server.tasks.activity(taskId)`（`packages/server/src/index.ts:263-269`），Host 的 activity 卡片已在读取它（`src/host/activity/domain.ts:64`）。上限为 1000 条、4 MiB，task 结束后保留 10 分钟（`packages/cloud/src/activity.ts:8-10`）。`render_widget` 与数据工具在同一 Turn 内调用，解析时结果仍在。Host 不新建工具结果表，只把校验后的 snapshot 复制进 D2 的 widget 记录：活动尾部会过期，widget 要比它活得久。跨 Turn 引用不在 v1（Owner 已确认，O3）。
 
 ### D6. 尺寸上限与错误码
 
@@ -152,7 +152,7 @@ appliesTo:
 | widget 条目的唯一权威是 Host 的 widget 记录；工具结果不另存表；UI 草稿只在 `store.ts`，按 widgetId 存放 | 单一事实来源；List 回收单元格时草稿不丢失 | 需要旧 snapshot 时读 widget 记录；需要表单状态时读 store 中按 widgetId 存放的草稿 |
 | 每个组件每种状态的主体高度固定，`loading` 与 `ready` 等高 | 视口内的 rev 替换不移动阅读位置（NSH List 只补偿视口上方的行） | 状态差异放在固定高度的提示行与主体内部，不改变卡片高度 |
 | 交互只经 `k8.act`，带 UI 生成并复用的 actionKey；`k8.answer` 删除；不可逆动作先在 UI 确认；审批仍走 `activity.*` | 一条交互路径，重试幂等；审批保留独立的安全路径 | 回答 question 用 `k8.act`（`itemKey: q<id>`、`action: 'answer'`）；widget 动作用 `k8.act`（`itemKey: w<id>`），不可逆的先弹 `alertdialog` |
-| `render_widget` 只经 task-scoped host toolset 声明，不写逐 adapter 代码，不为不支持 `mcpToolsets` 的引擎回退 | 一种工具声明机制；每次调用都绑定到可验证的 task | 新引擎声明 `mcpToolsets` 即可获得该工具；task 绑定按 §5 O1 的 Owner 裁定落地 |
+| `render_widget` 只经 task-scoped host toolset 声明，不写逐 adapter 代码，不为不支持 `mcpToolsets` 的引擎回退 | 一种工具声明机制；每次调用都绑定到可验证的 task | 新引擎声明 `mcpToolsets` 即可获得该工具；task 绑定经 [#2559](https://github.com/Ancienttwo/byok-sdk/issues/2559) 的 `host-mcp-task-context` 通道落地 |
 
 ## 4. 不在本 ADR 内
 
@@ -161,11 +161,13 @@ appliesTo:
 - 新增 D2 能力。
 - 对话回复 `MarkdownView` 的默认 `html`、`images` 选项。它早于本 ADR 存在（`nsh-app/src/ui/MarkdownView.tsx:24-39`），回复中可以出现 `data:` 图片，ADR-052 D2 已承接该解析面。是否同样关闭，由 NSH UI 层另行决定（调研 §7）。
 
-## 5. 待 Owner 决定的问题
+## 5. Owner 问题与裁定
 
-- **O1（认证路径）**：嵌入式 `@byok-sdk/server` 是否增加 `host-mcp-task-context` 声明与 task 断言验证（路径 A，推荐），还是在 `packages/client` 新增 SDK 保留的 widget helper（路径 B）。裁定前，#2554 无法把解析错误同步返回模型。
-- **O2**：用 `{ server, tool, input, pointer? }` 取代 mock 的 `{ turnId, toolCallId }`。
-- **O3**：v1 只在发起调用的 task 内解析。跨 Turn 引用需要 Host 另存一份工具结果，会形成第二个记录。
-- **O4**：数据工具的输出约定。Host 只复制、不映射字段，下游 finance 数据工具须返回 snapshot 形状的 JSON，且单个结果小于 64 KiB inline 上限，需确认它们当前的输出。
-- **O5**：原位更新是否采用 `replaces: <widgetId>`（D7），需与 artifact 导出核对。
-- **D7**：spec v1 的组件类型与开放问题，等 artifact 导出。
+O1–O4 已由 Owner 于 2026-11-27 裁定（[决议记录](https://github.com/Ancienttwo/byok-sdk/issues/2553#issuecomment-7219557886)）。
+
+- **O1（认证路径，已裁定：路径 A）**：`@byok-sdk/server` 增加显式开关，声明 `host-mcp-task-context`，并用 cloud 现有的验证器验证 task 断言；widget toolset 子进程经 loopback 向 Host 证明自己的 task。该切片是独立的 High 级子 issue [#2559](https://github.com/Ancienttwo/byok-sdk/issues/2559)，阻塞 #2554。
+- **O2（已裁定：接受）**：snapshotRef 为 `{ server, tool, input, pointer? }`，取代 mock 的 `{ turnId, toolCallId }`。
+- **O3（已裁定：接受）**：v1 只在发起调用的 task 内解析 snapshotRef。
+- **O4（已裁定）**：下游 finance 数据工具将改为返回 snapshot 形状的 JSON，单个结果小于 64 KiB inline 上限；Host 只复制、不映射字段。
+- **O5（待定）**：原位更新是否采用 `replaces: <widgetId>`（D7），需与 artifact 导出核对。
+- **D7（待定）**：spec v1 的组件类型与开放问题，等 artifact 导出。
