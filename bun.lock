@@ -224,7 +224,7 @@
     },
     "packages/bot-collaboration": {
       "name": "@byok-sdk/bot-collaboration",
-      "version": "0.47.0",
+      "version": "0.47.1",
       "dependencies": {
         "@byok-sdk/client": "workspace:*",
         "@byok-sdk/core": "workspace:*",
@@ -248,7 +248,7 @@
     },
     "packages/client": {
       "name": "@byok-sdk/client",
-      "version": "0.47.0",
+      "version": "0.47.1",
       "bin": {
         "byok-agent": "./dist/bin/byok-agent.js",
         "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js",
@@ -289,7 +289,7 @@
     },
     "packages/cloud": {
       "name": "@byok-sdk/cloud",
-      "version": "0.47.0",
+      "version": "0.47.1",
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
@@ -299,7 +299,7 @@
     },
     "packages/cloud-dataplane": {
       "name": "@byok-sdk/cloud-dataplane",
-      "version": "0.47.0",
+      "version": "0.47.1",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/core": "workspace:*",
@@ -329,7 +329,7 @@
     },
     "packages/core": {
       "name": "@byok-sdk/core",
-      "version": "0.47.0",
+      "version": "0.47.1",
       "dependencies": {
         "zod": "^4.6.6",
       },
@@ -339,7 +339,7 @@
     },
     "packages/keys": {
       "name": "@byok-sdk/keys",
-      "version": "0.47.0",
+      "version": "0.47.1",
       "bin": {
         "byok-pi-provider-launcher": "./dist/bin/pi-provider-launcher.js",
       },
@@ -353,7 +353,7 @@
     },
     "packages/protocol": {
       "name": "@byok-sdk/protocol",
-      "version": "0.47.0",
+      "version": "0.47.1",
       "dependencies": {
         "@cfworker/json-schema": "4.1.1",
         "zod": "^4.6.6",
@@ -365,7 +365,7 @@
     },
     "packages/server": {
       "name": "@byok-sdk/server",
-      "version": "0.47.0",
+      "version": "0.47.1",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/core": "workspace:*",
@@ -388,7 +388,7 @@
     },
     "packages/ui-runtime": {
       "name": "@byok-sdk/ui-runtime",
-      "version": "0.47.0",
+      "version": "0.47.1",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
