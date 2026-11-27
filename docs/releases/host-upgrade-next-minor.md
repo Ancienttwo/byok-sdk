@@ -36,6 +36,11 @@ SDK. Rebuild Node SEA launchers with a supported Node executable.
 - Antigravity CLI 1.5.18 is the qualified version. Update to 1.5.18 to clear the default advisory for an older supported version. The SDK sets `AGY_CLI_DISABLE_AUTO_UPDATE=true` for agy subprocesses.
 - Codex still receives the Host's exact structured answer. The SDK scrubs the secret fields from the matching native answer echo before recording or projection.
 
+## Suggested runtime versions (#2524)
+
+- Import `checkSuggestedRuntimeVersion` from `@byok-sdk/client` to show an advisory for an installed runtime below OAR's suggested minimum for recent models. It uses the bundled `suggestedRuntimeVersions` snapshot by default.
+- The Host may fetch `SUGGESTED_RUNTIME_VERSIONS_URL` on its own schedule, pass the decoded JSON through `parseSuggestedRuntimeVersions`, and supply a valid manifest to the check. The SDK performs the comparison offline. Compatibility floors, Host version policy, and the `required` and `available` upgrade states retain their existing meanings.
+
 ## OAR 0.136.0 (#2512, #2513)
 
 - `OpenCodeAdapter.listModels()` on OpenCode 2.x reads the catalog from a private `opencode serve --stdio` loopback listener instead of `opencode models --standalone`. Entries now carry `displayName`, `provider` and `effortLevels`, and a cold catalog no longer comes back id-only. The listener is stopped when the read ends, is cancelled or times out. On OpenCode 1.x and 2.x, `effortLevels` no longer lists the native `default` variant. No Host action.

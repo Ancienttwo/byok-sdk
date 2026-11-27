@@ -60,6 +60,17 @@ and publishes it after the version and liveness checks. For AGY and Grok,
 the result gives the vendor command and reason. Pi ships with the SDK. See
 [the Host upgrade checklist](../../docs/releases/host-upgrade-0.45.0.md#managed-runtime-upgrades).
 
+For model support advice, `checkSuggestedRuntimeVersion(runtimeId, installedVersion)`
+compares the observed version with OAR's bundled `suggestedRuntimeVersions`
+snapshot. Advice includes the suggested minimum and reason. The check returns
+`null` for an unknown runtime, an unreadable version, or a version at or above
+the suggestion.
+
+The Host controls live refreshes from `SUGGESTED_RUNTIME_VERSIONS_URL`. Pass
+the decoded JSON to `parseSuggestedRuntimeVersions`, then pass a valid manifest
+as the check's third argument. The parser returns `null` for an invalid document
+and drops malformed runtime rows from a valid one. These helpers run offline.
+
 ## Exact provider-profile admission
 
 When `DaemonConfig.piByokLauncher` is configured, the daemon advertises the

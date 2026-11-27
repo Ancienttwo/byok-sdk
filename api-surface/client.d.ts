@@ -416,6 +416,7 @@
 //   SKILL_PACK_LOCK_FILENAME -> dist/daemon/skill-pack-installer.d.ts
 //   SKILL_PACK_LOCK_SCHEMA -> dist/daemon/skill-pack-installer.d.ts
 //   SKILL_PACK_RESPONSE_MAX_BYTES -> dist/daemon/skill-pack-installer.d.ts
+//   SUGGESTED_RUNTIME_VERSIONS_URL -> dist/runtime/oar-suggested-versions.d.ts
 //   ScratchRootPathError -> dist/daemon/retention/scratch.d.ts
 //   SdkDistributionBin -> dist/sdk-native-assets.d.ts
 //   SdkDistributionBinRole -> dist/sdk-native-assets.d.ts
@@ -466,6 +467,9 @@
 //   StoragePressureState -> dist/daemon/retention/pressure.d.ts
 //   StoreCompatibility -> @byok-sdk/core#StoreCompatibility
 //   StoreServiceState -> dist/lifecycle/store-service-state.d.ts
+//   SuggestedRuntimeVersionAdvice -> dist/runtime/oar-suggested-versions.d.ts
+//   SuggestedRuntimeVersionEntry -> dist/runtime/oar-suggested-versions.d.ts
+//   SuggestedRuntimeVersionsManifest -> dist/runtime/oar-suggested-versions.d.ts
 //   SweepReport -> dist/daemon/retention/registry.d.ts
 //   SystemToolUnavailableError -> @byok-sdk/core/system-tool#SystemToolUnavailableError
 //   TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES -> dist/daemon/control-protocol.d.ts
@@ -524,6 +528,7 @@
 //   buildRuntimeEnvironment -> dist/runtime/environment.d.ts
 //   bundledSdkHelperHost -> dist/sdk-reserved-helper-host.d.ts
 //   checkDaemonConfig -> dist/daemon/config-schema/check.d.ts
+//   checkSuggestedRuntimeVersion -> dist/runtime/oar-suggested-versions.d.ts
 //   checkUpgradeFrom -> dist/lifecycle/upgrade-from.d.ts
 //   claimServiceLifecycleOwner -> dist/lifecycle/service-unit.d.ts
 //   classifyToolCall -> dist/tool-authorization.d.ts
@@ -569,6 +574,7 @@
 //   parseInputPreparationCancelParams -> dist/daemon/control-protocol.d.ts
 //   parseInputPreparationLookupParams -> dist/daemon/control-protocol.d.ts
 //   parseInputPreparationRequestParams -> dist/daemon/control-protocol.d.ts
+//   parseSuggestedRuntimeVersions -> dist/runtime/oar-suggested-versions.d.ts
 //   parseTaskAssertionIssueParams -> dist/daemon/control-protocol.d.ts
 //   parseToolAuthorizationMode -> dist/tool-authorization.d.ts
 //   parseToolAuthorizationPolicy -> dist/tool-authorization.d.ts
@@ -601,6 +607,7 @@
 //   serviceEnvironmentStatus -> dist/login-shell-environment.d.ts
 //   skillPacksRoot -> dist/daemon/skill-pack-installer.d.ts
 //   stableAgentHomeOwnerId -> dist/agent-home.d.ts
+//   suggestedRuntimeVersions -> dist/runtime/oar-suggested-versions.d.ts
 //   uninstallManagedRuntime -> dist/lifecycle/runtime-installation.d.ts
 //   upgradeRuntime -> dist/lifecycle/runtime-installation.d.ts
 //   validateAgentRef -> dist/agent-home.d.ts
@@ -4324,7 +4331,7 @@ export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, Runtime
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { upgradeRuntime, uninstallManagedRuntime, type RuntimeUpgradeOptions, type RuntimeUpgradeResult } from './lifecycle/runtime-installation.js';
 export type { ManagedRuntimeId } from './adapters/managed-runtime-path.js';
-export type { UpgradeableRuntimeId, RuntimeUpgradeAdvice } from './runtime/runtime-releases.js';
+export { SUGGESTED_RUNTIME_VERSIONS_URL, suggestedRuntimeVersions, parseSuggestedRuntimeVersions, checkSuggestedRuntimeVersion, type SuggestedRuntimeVersionEntry, type SuggestedRuntimeVersionsManifest, type SuggestedRuntimeVersionAdvice, type UpgradeableRuntimeId, type RuntimeUpgradeAdvice, } from './runtime/runtime-releases.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
 export { DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, PairingAttemptRefusedError, PairingBusyError, PairingInputInvalidError, PairingCodeRejectedError, PairingSupersededError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
@@ -5591,6 +5598,32 @@ export declare class RuntimeEnvironmentUnavailableError extends Error {
     constructor(reason: ServiceEnvironmentUnavailableCode);
 }
 export declare function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy, conflicts?: RuntimeEnvironmentConflictRule): Promise<RuntimeEnvironment>;
+// ==== @byok-sdk/client dist/runtime/oar-suggested-versions.d.ts ====
+export interface SuggestedRuntimeVersionEntry {
+  readonly version: string;
+  readonly reason: string;
+  readonly verifiedAt?: string;
+  readonly evidence?: string;
+}
+export interface SuggestedRuntimeVersionsManifest {
+  readonly schemaVersion: 1;
+  readonly updatedAt: string;
+  readonly runtimes: Readonly<Record<string, SuggestedRuntimeVersionEntry>>;
+}
+export interface SuggestedRuntimeVersionAdvice {
+  readonly runtime: string;
+  readonly installedVersion: string;
+  readonly suggestedMinVersion: string;
+  readonly reason: string;
+}
+export declare const SUGGESTED_RUNTIME_VERSIONS_URL: string;
+export declare const suggestedRuntimeVersions: SuggestedRuntimeVersionsManifest;
+export declare function parseSuggestedRuntimeVersions(raw: unknown): SuggestedRuntimeVersionsManifest | null;
+export declare function checkSuggestedRuntimeVersion(
+  runtimeId: string,
+  installedVersion: string | undefined,
+  manifest?: SuggestedRuntimeVersionsManifest,
+): SuggestedRuntimeVersionAdvice | null;
 // ==== @byok-sdk/client dist/runtime/runtime-reader-types.d.ts ====
 export interface RuntimeReadOptions {
     readonly signal?: AbortSignal;
@@ -5695,6 +5728,7 @@ import { agyVersionToken } from '../adapters/antigravity/agy-version.js';
 import { grokVersionToken } from '../adapters/grok/grok-version.js';
 import { type RuntimeObservation } from '../runtime-detection.js';
 import type { RuntimeAdapterDescriptor, RuntimeDetectResult } from '../types.js';
+export { SUGGESTED_RUNTIME_VERSIONS_URL, suggestedRuntimeVersions, parseSuggestedRuntimeVersions, checkSuggestedRuntimeVersion, type SuggestedRuntimeVersionEntry, type SuggestedRuntimeVersionsManifest, type SuggestedRuntimeVersionAdvice, } from './oar-suggested-versions.js';
 // support
 interface RuntimeRelease {
     readonly qualifiedVersion: string;

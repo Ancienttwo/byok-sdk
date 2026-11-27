@@ -76,8 +76,8 @@ for (const name of ['LICENSE', 'PROVENANCE.md', 'source-manifest.json']) {
   await copyFile(new URL(name, vendor), new URL(`${layout.basePath}/${name}`, assets));
 }
 await copyFile(new URL('src/bin/pi-todo-runtime.d.ts', root), new URL('dist/bin/pi-todo-runtime.d.ts', root));
-// Hand-written declarations for the private OAR entries.
-for (const declaration of ['acp-session-runtime.d.ts', 'oar-readers.d.ts']) {
+// Hand-written declarations for the OAR bridges reached by the distribution.
+for (const declaration of ['acp-session-runtime.d.ts', 'oar-readers.d.ts', 'oar-suggested-versions.d.ts']) {
   await copyFile(new URL(`src/runtime/${declaration}`, root), new URL(`dist/runtime/${declaration}`, root));
 }
 for (const name of ['THIRD-PARTY.md', 'third-party-manifest.json']) {

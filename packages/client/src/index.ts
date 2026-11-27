@@ -130,7 +130,17 @@ export type {
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { upgradeRuntime, uninstallManagedRuntime, type RuntimeUpgradeOptions, type RuntimeUpgradeResult } from './lifecycle/runtime-installation.js';
 export type { ManagedRuntimeId } from './adapters/managed-runtime-path.js';
-export type { UpgradeableRuntimeId, RuntimeUpgradeAdvice } from './runtime/runtime-releases.js';
+export {
+  SUGGESTED_RUNTIME_VERSIONS_URL,
+  suggestedRuntimeVersions,
+  parseSuggestedRuntimeVersions,
+  checkSuggestedRuntimeVersion,
+  type SuggestedRuntimeVersionEntry,
+  type SuggestedRuntimeVersionsManifest,
+  type SuggestedRuntimeVersionAdvice,
+  type UpgradeableRuntimeId,
+  type RuntimeUpgradeAdvice,
+} from './runtime/runtime-releases.js';
 export {
   DAEMON_CONFIG_SCHEMA_VERSION,
   DaemonConfigInvalidError,

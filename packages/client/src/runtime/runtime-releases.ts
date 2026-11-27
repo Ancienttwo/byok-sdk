@@ -8,6 +8,16 @@ import { compareRuntimeSemver } from './compare-runtime-semver.js';
 import { projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection.js';
 import type { RuntimeAdapterDescriptor, RuntimeDetectResult } from '../types.js';
 
+export {
+  SUGGESTED_RUNTIME_VERSIONS_URL,
+  suggestedRuntimeVersions,
+  parseSuggestedRuntimeVersions,
+  checkSuggestedRuntimeVersion,
+  type SuggestedRuntimeVersionEntry,
+  type SuggestedRuntimeVersionsManifest,
+  type SuggestedRuntimeVersionAdvice,
+} from './oar-suggested-versions.js';
+
 interface RuntimeRelease {
   readonly qualifiedVersion: string;
   readonly token: (output: string) => string | undefined;
