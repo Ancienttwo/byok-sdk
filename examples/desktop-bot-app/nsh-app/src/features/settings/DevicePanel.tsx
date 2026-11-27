@@ -79,6 +79,8 @@ function StatusBadge(props: { status: DoctorStatus; testID: string }) {
 
 const CELL = "flex-1 text-xs text-foreground";
 const HEADER_CELL = "flex-1 text-xs font-medium text-muted-foreground";
+/** The version policy column fits its widest badge ("none reported") at the 840 pt minimum window width. */
+const BADGE_COLUMN = "w-36 shrink-0";
 
 /** The daemon's status and the SDK doctor, shown as the Host projected them (`host/settings/device.ts`). */
 export function DevicePanel(props: { device: DeviceView }) {
@@ -102,7 +104,7 @@ export function DevicePanel(props: { device: DeviceView }) {
             <Text role="columnheader" class={HEADER_CELL}>Found</Text>
             <Text role="columnheader" class={HEADER_CELL}>Outcome</Text>
             <Text role="columnheader" class={HEADER_CELL}>Version</Text>
-            <Text role="columnheader" class={HEADER_CELL}>Version policy</Text>
+            <Text role="columnheader" class={`${BADGE_COLUMN} text-xs font-medium text-muted-foreground`}>Version policy</Text>
           </View>
           <Each of={props.device.runtimes} key={(runtime) => runtime.id}>
             {(runtime) => (
@@ -113,7 +115,7 @@ export function DevicePanel(props: { device: DeviceView }) {
                   {`${runtime().outcome}${runtime().reason === undefined ? "" : `: ${runtime().reason}`}`}
                 </Text>
                 <Text role="cell" class={CELL}>{runtime().version ?? "—"}</Text>
-                <View role="cell" class="flex-1 flex-row">
+                <View role="cell" class={`${BADGE_COLUMN} flex-row`}>
                   <VerdictBadge testID={`settings-runtime-${runtime().id}-verdict`} verdict={runtime().verdict} />
                 </View>
               </View>

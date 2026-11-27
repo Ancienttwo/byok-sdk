@@ -406,4 +406,33 @@ describe("KeysScreen (#2461 Slice 2)", () => {
     await app.type("id:keys-field-display_name", "中文配置名称");
     expect(app.value("id:keys-field-display_name")).toBe("中文配置名称");
   });
+
+  test("at the 840 px minimum window width, the card header actions stay inside their header row", async () => {
+    const app = await open("../../../App.tsx", {
+      platform: "linux",
+      width: 840,
+      height: 560,
+      modules: runningShell((method: string) => {
+        if (method === "keys.list") {
+          return [];
+        }
+        if (method === "k8.view") {
+          return { bots: [], roles: [], models: [], busy: false };
+        }
+        return null;
+      }),
+    });
+
+    await app.waitFor("id:keys-new-btn");
+    for (const [row, controls] of [
+      ["id:keys-stored-header", ["id:keys-new-btn", "id:keys-reload-btn"]],
+      ["id:keys-models-header", ["id:keys-models-refresh-btn"]],
+    ] as const) {
+      const header = app.layout(row)!;
+      for (const control of controls) {
+        const box = app.layout(control)!;
+        expect(box.x + box.width <= header.x + header.width).toBe(true);
+      }
+    }
+  });
 });

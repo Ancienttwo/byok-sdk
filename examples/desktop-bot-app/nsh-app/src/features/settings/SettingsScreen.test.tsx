@@ -321,4 +321,16 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
     expect(count(calls, "settings.get")).toBe(0);
     expect(count(calls, "settings.exportDiagnostics")).toBe(0);
   });
+
+  test("at the 840 px minimum window width, the version policy badges stay inside their runtime rows", async () => {
+    const calls: Call[] = [];
+    const app = await open("../../../App.tsx", { platform: "linux", width: 840, height: 560, modules: settingsShell(calls) });
+    await app.press("id:nav-settings");
+    await app.waitFor("id:settings-runtime-codex-verdict");
+    for (const id of ["pi", "codex"]) {
+      const row = app.layout(`id:settings-runtime-${id}`)!;
+      const badge = app.layout(`id:settings-runtime-${id}-verdict`)!;
+      expect(badge.x + badge.width <= row.x + row.width).toBe(true);
+    }
+  });
 });

@@ -140,7 +140,7 @@ function ReceiptCard(props: { status: ProviderStatus }) {
       class="p-3 rounded-(--radius) border border-success bg-card gap-2"
     >
       <View class="flex-row items-center justify-between gap-2">
-        <Text class="text-sm font-semibold text-foreground">
+        <Text class="flex-1 text-sm font-semibold text-foreground">
           {`Saved ${props.status.display_name}`}
         </Text>
         <Badge
@@ -504,8 +504,8 @@ export function KeysScreen(props: KeysScreenProps) {
       {/* Stored Provider Profiles */}
       <Card>
         <CardHeader>
-          <View class="flex-row items-center justify-between gap-3">
-            <View class="gap-1">
+          <View testID="keys-stored-header" class="flex-row items-center justify-between gap-3">
+            <View class="flex-1 min-w-0 gap-1">
               <CardTitle>Stored providers</CardTitle>
               <CardDescription>
                 Secret-free provider statuses read via custody child under Host maintenance lock.
@@ -691,8 +691,8 @@ export function KeysScreen(props: KeysScreenProps) {
       {/* Host-Projected Bot Models */}
       <Card>
         <CardHeader>
-          <View class="flex-row items-center justify-between gap-3">
-            <View class="gap-1">
+          <View testID="keys-models-header" class="flex-row items-center justify-between gap-3">
+            <View class="flex-1 min-w-0 gap-1">
               <CardTitle>Models Bots can use</CardTitle>
               <CardDescription>
                 Live model catalog entries from Host k8.view (loads once the Host runs; refreshes on Host state hints).
