@@ -41,6 +41,10 @@ export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> 
   images?: readonly RuntimeInputImage[];
   /** Exact per-task reasoning effort, interpreted by the selected runtime. */
   effort?: string;
+  /** Exact service tier requested for the runtime session. */
+  serviceTier?: string;
+  /** Explicit permission to accept a runtime-reported default tier. */
+  serviceTierFallback?: 'default';
   /** Exact per-task model selector for the harness lane. */
   modelId?: string;
   /** The runtime session to resume (`session.mode: 'resume'` on the offer); absent for a fresh session. */
@@ -377,6 +381,10 @@ export interface RuntimeAdapterDescriptor {
   readonly byokProviderId?: string;
   /** Consumes explicit per-task reasoning effort. */
   readonly supportsEffort?: boolean;
+  /** Consumes explicit per-task service-tier selection. */
+  readonly supportsServiceTier?: boolean;
+  /** Honors an explicit default-tier fallback. */
+  readonly supportsServiceTierFallback?: boolean;
   /**
    * Whether this adapter actually CONSUMES
    * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
@@ -510,6 +518,8 @@ export interface RuntimeOperationManifest {
   /** The credential-free runtime/lane/provider/model authority for this operation: the offer's model-lane target. */
   readonly selection?: HarnessSelection;
   readonly effort?: string;
+  readonly serviceTier?: string;
+  readonly serviceTierFallback?: 'default';
   readonly sessionRef?: string;
   /** Strict Agent identity, present on every `task.offer`. */
   readonly agentRef?: AgentRef;
@@ -774,6 +784,8 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     ...(descriptor.defaultModelModes === undefined ? {} : { defaultModelModes: Object.freeze([...descriptor.defaultModelModes]) }),
     ...(descriptor.byokProviderId === undefined ? {} : { byokProviderId: descriptor.byokProviderId }),
     ...(descriptor.supportsEffort === true ? { supportsEffort: true } : {}),
+    ...(descriptor.supportsServiceTier === true ? { supportsServiceTier: true } : {}),
+    ...(descriptor.supportsServiceTierFallback === true ? { supportsServiceTierFallback: true } : {}),
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.mcpToolApprovals === true ? { mcpToolApprovals: true } : {}),
     ...(descriptor.progressMessageBoundary === undefined ? {} : { progressMessageBoundary: progressMessageBoundaryOf(descriptor.progressMessageBoundary) }),
@@ -834,6 +846,8 @@ export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest)
     requiredToolsetIds: Object.freeze([...manifest.requiredToolsetIds]),
     ...(selection === undefined ? {} : { selection }),
     ...(manifest.effort === undefined ? {} : { effort: manifest.effort }),
+    ...(manifest.serviceTier === undefined ? {} : { serviceTier: manifest.serviceTier }),
+    ...(manifest.serviceTierFallback === undefined ? {} : { serviceTierFallback: manifest.serviceTierFallback }),
     ...(manifest.sessionRef === undefined ? {} : { sessionRef: manifest.sessionRef }),
     ...(manifest.agentRef === undefined
       ? {}

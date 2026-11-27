@@ -25,6 +25,7 @@
  */
 import {
   AGENT_INPUT_PREPARATION_CAPABILITY,
+  HARNESS_SERVICE_TIER_CAPABILITY,
   INPUT_IMAGES_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
   SEALED_PAYLOAD_V2_CAPABILITY,
@@ -95,6 +96,8 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   offerRow('messageEgress', 'agent-message-egress'),
   offerRow('session.mode', 'agent-egress-fresh-session', 'fresh'),
   offerRow('preparation', AGENT_INPUT_PREPARATION_CAPABILITY),
+  offerRow('target.serviceTier', HARNESS_SERVICE_TIER_CAPABILITY),
+  offerRow('target.serviceTierFallback', HARNESS_SERVICE_TIER_CAPABILITY),
   // Server to daemon: Agent control messages.
   { surface: 'agent.content.read', capability: 'agent-home-contract' },
   { surface: 'agent.content.read', capability: 'agent-egress-policy' },

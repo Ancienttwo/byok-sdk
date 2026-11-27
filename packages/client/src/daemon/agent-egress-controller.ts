@@ -106,8 +106,8 @@ export class AgentEgressController {
   /**
    * Coalesce to the latest value before TaskRunner builds a `task.progress`
    * envelope. Events go to the Host as the runtime produced them. An `error`
-   * reports a failure, not a value a later event supersedes, so every accepted
-   * `error` is sent; the other events of the batch coalesce to their last.
+   * reports a failure, so every accepted `error` is sent. The applied tier
+   * and ordinary progress each coalesce to their own latest value.
    */
   projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[] {
     if (!this.active) {
@@ -119,6 +119,7 @@ export class AgentEgressController {
     const accepted: number[] = [];
     const errors = new Set<number>();
     let latest = -1;
+    let latestTier = -1;
     for (const [index, event] of input.events.entries()) {
       const offered = this.latest.offer({ agentRef: input.agentRef, tenantId: this.options.tenantId, event }, this.options.policy);
       if (!offered.accepted) {
@@ -127,9 +128,10 @@ export class AgentEgressController {
       }
       accepted.push(index);
       if (event.type === 'error') errors.add(index);
+      else if (event.type === 'service_tier') latestTier = index;
       else latest = index;
     }
-    const sent = (index: number): boolean => index === latest || errors.has(index);
+    const sent = (index: number): boolean => index === latest || index === latestTier || errors.has(index);
     for (const index of accepted) {
       if (sent(index)) continue;
       this.latestStatus.replaced += 1;

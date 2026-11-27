@@ -6,7 +6,7 @@ import { createProviderProvisioningNoticeProcessor } from '../provider-provision
 import { createAgentMemoryIntentProcessor } from '../agent-memory-intent.js';
 import { InputPreparationCompletionClient } from '../input-preparation-completion-client.js';
 import { createRemoteInputPreparationHandler } from '../input-preparation-remote.js';
-import { INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
+import { HARNESS_SERVICE_TIER_CAPABILITY, INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
 import { BlobClient } from '../blob-client.js';
 import { SealedTasks } from '../sealed-task.js';
 import type { DaemonScope } from './scope.js';
@@ -39,6 +39,9 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
   // cannot. Exclude installations the daemon is configured not to select.
   if (run.harnesses.some(({ capabilities }) => capabilities.images !== false)) {
     capabilities.push(INPUT_IMAGES_CAPABILITY);
+  }
+  if (run.harnesses.some(({ capabilities }) => capabilities.serviceTier === true)) {
+    capabilities.push(HARNESS_SERVICE_TIER_CAPABILITY);
   }
   const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
     ? new AgentHomeProjectionCompletionClient({

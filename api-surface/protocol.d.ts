@@ -228,6 +228,9 @@
 //   EventsPollResponseSchema -> dist/http-api.d.ts
 //   ExecutionTarget -> dist/messages.d.ts
 //   ExecutionTargetSchema -> dist/messages.d.ts
+//   HARNESS_SERVICE_TIER_CAPABILITY -> dist/capability-constants.d.ts
+//   HARNESS_SERVICE_TIER_MAX_LENGTH -> dist/capability-constants.d.ts
+//   HARNESS_SERVICE_TIER_TOKEN -> dist/capability-constants.d.ts
 //   HOST_MCP_TASK_CONTEXT_CAPABILITY -> dist/capability-constants.d.ts
 //   HandoffPack -> dist/handoff-pack.d.ts
 //   HandoffPackBudgets -> dist/handoff-pack.d.ts
@@ -534,6 +537,9 @@
 //   AgentMemoryStartRefusal -> dist/capability-constants.d.ts
 //   CAPABILITY_FLAGS -> dist/version.d.ts
 //   CapabilityFlag -> dist/version.d.ts
+//   HARNESS_SERVICE_TIER_CAPABILITY -> dist/capability-constants.d.ts
+//   HARNESS_SERVICE_TIER_MAX_LENGTH -> dist/capability-constants.d.ts
+//   HARNESS_SERVICE_TIER_TOKEN -> dist/capability-constants.d.ts
 //   HOST_MCP_TASK_CONTEXT_CAPABILITY -> dist/capability-constants.d.ts
 //   INPUT_IMAGES_CAPABILITY -> dist/capability-constants.d.ts
 //   INPUT_PREPARATION_WIRE_VERSION -> dist/capability-constants.d.ts
@@ -772,6 +778,9 @@ export declare const AgentEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"turn_end">;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"service_tier">;
+    serviceTier: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"error">;
     message: z.ZodString;
     agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -869,6 +878,9 @@ export declare const AgentEventOrUnknownSchema: z.ZodUnion<readonly [z.ZodDiscri
     contentType: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"turn_end">;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"service_tier">;
+    serviceTier: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"error">;
     message: z.ZodString;
@@ -2044,6 +2056,9 @@ export declare const PREPARED_AGENT_MEMORY_MODES: readonly ['none', 'read', 'rea
 export declare function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number];
 export declare const NATIVE_SESSIONS_CAPABILITY: 'native-sessions';
 export declare const TASK_EXECUTION_OPTIONS_CAPABILITY: 'task-execution-options';
+export declare const HARNESS_SERVICE_TIER_CAPABILITY: 'harness-service-tier';
+export declare const HARNESS_SERVICE_TIER_MAX_LENGTH = 64;
+export declare const HARNESS_SERVICE_TIER_TOKEN: RegExp;
 export declare const INPUT_IMAGES_CAPABILITY: 'input-images';
 // ==== @byok-sdk/protocol dist/codec.d.ts ====
 import type { z } from 'zod';
@@ -2497,6 +2512,8 @@ export declare const HostOfferPlainPayloadSchema: z.ZodObject<{
             modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
+        serviceTier: z.ZodOptional<z.ZodString>;
+        serviceTierFallback: z.ZodOptional<z.ZodLiteral<"default">>;
     }, z.core.$strict>], "lane">;
     terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         mode: z.ZodLiteral<"none">;
@@ -2626,6 +2643,8 @@ export declare const HostOfferSealedPayloadSchema: z.ZodObject<{
             modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
+        serviceTier: z.ZodOptional<z.ZodString>;
+        serviceTierFallback: z.ZodOptional<z.ZodLiteral<"default">>;
     }, z.core.$strict>], "lane">;
     terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         mode: z.ZodLiteral<"none">;
@@ -2846,6 +2865,8 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
                 "byok-profile": "byok-profile";
             }>>>;
             effort: z.ZodBoolean;
+            serviceTier: z.ZodOptional<z.ZodBoolean>;
+            serviceTierFallback: z.ZodOptional<z.ZodBoolean>;
             byokProviderId: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
         versionPolicy: z.ZodOptional<z.ZodObject<{
@@ -4125,6 +4146,8 @@ export declare const HarnessInfoSchema: z.ZodObject<{
             "byok-profile": "byok-profile";
         }>>>;
         effort: z.ZodBoolean;
+        serviceTier: z.ZodOptional<z.ZodBoolean>;
+        serviceTierFallback: z.ZodOptional<z.ZodBoolean>;
         byokProviderId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
     versionPolicy: z.ZodOptional<z.ZodObject<{
@@ -4173,6 +4196,8 @@ export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
             "byok-profile": "byok-profile";
         }>>>;
         effort: z.ZodBoolean;
+        serviceTier: z.ZodOptional<z.ZodBoolean>;
+        serviceTierFallback: z.ZodOptional<z.ZodBoolean>;
         byokProviderId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
     versionPolicy: z.ZodOptional<z.ZodObject<{
@@ -4263,6 +4288,8 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
                 "byok-profile": "byok-profile";
             }>>>;
             effort: z.ZodBoolean;
+            serviceTier: z.ZodOptional<z.ZodBoolean>;
+            serviceTierFallback: z.ZodOptional<z.ZodBoolean>;
             byokProviderId: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
         versionPolicy: z.ZodOptional<z.ZodObject<{
@@ -4386,6 +4413,8 @@ export declare const ExecutionTargetSchema: z.ZodDiscriminatedUnion<[z.ZodObject
         modelId: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>], "mode">;
     effort: z.ZodOptional<z.ZodString>;
+    serviceTier: z.ZodOptional<z.ZodString>;
+    serviceTierFallback: z.ZodOptional<z.ZodLiteral<"default">>;
 }, z.core.$strict>], "lane">;
 export type ExecutionTarget = z.infer<typeof ExecutionTargetSchema>;
 export declare function harnessSupportsTarget(harness: {
@@ -4394,6 +4423,8 @@ export declare function harnessSupportsTarget(harness: {
         readonly selectionModes: readonly SelectionMode[];
         readonly defaultModelModes?: readonly DefaultModelSelectionMode[];
         readonly effort: boolean;
+        readonly serviceTier?: boolean;
+        readonly serviceTierFallback?: boolean;
         readonly byokProviderId?: string;
     };
 }, target: ExecutionTarget): boolean;
@@ -4534,6 +4565,8 @@ export declare const TaskOfferPlainPayloadSchema: z.ZodObject<{
             modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
+        serviceTier: z.ZodOptional<z.ZodString>;
+        serviceTierFallback: z.ZodOptional<z.ZodLiteral<"default">>;
     }, z.core.$strict>], "lane">;
     terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         mode: z.ZodLiteral<"none">;
@@ -4663,6 +4696,8 @@ export declare const TaskOfferSealedPayloadSchema: z.ZodObject<{
             modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
+        serviceTier: z.ZodOptional<z.ZodString>;
+        serviceTierFallback: z.ZodOptional<z.ZodLiteral<"default">>;
     }, z.core.$strict>], "lane">;
     terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         mode: z.ZodLiteral<"none">;
@@ -4840,6 +4875,8 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
             modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
+        serviceTier: z.ZodOptional<z.ZodString>;
+        serviceTierFallback: z.ZodOptional<z.ZodLiteral<"default">>;
     }, z.core.$strict>], "lane">;
     terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         mode: z.ZodLiteral<"none">;
@@ -4967,6 +5004,8 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
             modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
+        serviceTier: z.ZodOptional<z.ZodString>;
+        serviceTierFallback: z.ZodOptional<z.ZodLiteral<"default">>;
     }, z.core.$strict>], "lane">;
     terminalProjection: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
         mode: z.ZodLiteral<"none">;
@@ -6131,6 +6170,9 @@ export declare const TaskProgressPayloadSchema: z.ZodUnion<readonly [z.ZodObject
         contentType: z.ZodString;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"turn_end">;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"service_tier">;
+        serviceTier: z.ZodString;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"error">;
         message: z.ZodString;
@@ -7341,7 +7383,7 @@ export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelec
 export declare const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export declare const PROTOCOL_VERSION = 8;
 export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
-export declare const CAPABILITY_FLAGS: readonly ['toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "host-mcp-task-context", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", "agent-memory-commit-on-success", "native-sessions", "sealed-payload-v1", "sealed-payload-v2", "input-images"];
+export declare const CAPABILITY_FLAGS: readonly ['toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "host-mcp-task-context", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", "agent-memory-commit-on-success", "native-sessions", "sealed-payload-v1", "sealed-payload-v2", "input-images", "harness-service-tier"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 import type { MessageType } from './messages.js';

@@ -521,6 +521,63 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(spawnFn).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { serviceTier: 'fast', sessionRef: undefined, fallback: undefined, readback: undefined, applied: 'fast' },
+    { serviceTier: 'default', sessionRef: 'resume-me', fallback: undefined, readback: undefined, applied: 'default' },
+    { serviceTier: 'fast', sessionRef: 'resume-me', fallback: 'default' as const, readback: 'cooldown', applied: 'default' },
+  ])('applies and projects $serviceTier (resume=$sessionRef, fallback=$fallback)', async ({ serviceTier, sessionRef, fallback, readback, applied }) => {
+    const calls: string[][] = [];
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), agentUserContext: 'excluded',
+      spawnFn: ((command: string, args: string[], options: Parameters<SpawnFn>[2]) => { calls.push([...args]); return realSpawn(command, args, options); }) as SpawnFn });
+    const resources = await makeCtx({ ...process.env, FAKE_CLAUDE_SESSION_ID: sessionRef, FAKE_CLAUDE_TIER_READBACK: readback, FAKE_CLAUDE_TIER_UPDATE: 'on' });
+    try {
+      const session = await startAdapter(adapter, { ...baseTask, serviceTier, serviceTierFallback: fallback, sessionRef },
+        { ...resources, agentHome: resources.workspaceDir });
+      openSessions.push(session);
+      const args = calls[0]!;
+      expect(args.filter(arg => arg === '--settings')).toHaveLength(1);
+      expect(JSON.parse(await fs.readFile(args[args.indexOf('--settings') + 1]!, 'utf8'))).toMatchObject({
+        fastMode: serviceTier === 'fast', outputStyle: 'default', env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
+      });
+      expect((await takeTurn(session)).filter(event => event.type === 'service_tier')).toEqual([
+        { type: 'service_tier', serviceTier: applied }, { type: 'service_tier', serviceTier: 'fast' },
+      ]);
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { readback: 'off', fallback: undefined },
+    { readback: 'missing', fallback: 'default' as const },
+  ])('fails before prompting for tier $readback (fallback=$fallback)', async ({ readback, fallback }) => {
+    const resources = await makeCtx({ ...process.env, FAKE_CLAUDE_TIER_READBACK: readback });
+    const receipt = path.join(resources.workspaceDir, 'prompt.txt');
+    resources.env.FAKE_CLAUDE_USER_RECEIPT = receipt;
+    try {
+      await expect(startAdapter(fakeClaudeAdapter(), { ...baseTask, serviceTier: 'fast', serviceTierFallback: fallback }, resources)).rejects.toMatchObject({
+        phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+      });
+      await expect(fs.stat(receipt)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a manifest that adds a tier fallback before spawning Claude', async () => {
+    const spawnFn = vi.fn(() => { throw new Error('Claude must not spawn'); });
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn });
+    const resources = await makeCtx();
+    try {
+      await expect(startAdapter(adapter, { ...baseTask, serviceTier: 'fast' }, {
+        ...resources, startTierOptions: { serviceTierFallback: 'default' },
+      })).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message: expect.stringContaining('different runtime selection') });
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('a task.offer carrying a known sessionRef resumes via the real --resume flag, matching session_id', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_SESSION_ID: 'resume-me-123' });

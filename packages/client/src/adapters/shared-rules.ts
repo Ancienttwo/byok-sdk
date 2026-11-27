@@ -1,4 +1,5 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
+import { HARNESS_SERVICE_TIER_MAX_LENGTH, HARNESS_SERVICE_TIER_TOKEN } from '@byok-sdk/protocol/constants';
 
 type Usage = Extract<AgentEvent, { type: 'usage' }>;
 
@@ -23,6 +24,20 @@ export const record = (value: unknown): value is Record<string, unknown> =>
 
 export function objectRecord(value: unknown): Record<string, unknown> | undefined {
   return record(value) ? value : undefined;
+}
+
+export function projectedServiceTier(events: unknown): Extract<AgentEvent, { type: 'service_tier' }> | undefined {
+  if (!Array.isArray(events)) return undefined;
+  for (const value of events) {
+    const event = objectRecord(value);
+    if (event?.kind !== 'service_tier') continue;
+    const { serviceTier } = event;
+    if (typeof serviceTier === 'string' && serviceTier.length <= HARNESS_SERVICE_TIER_MAX_LENGTH
+      && HARNESS_SERVICE_TIER_TOKEN.test(serviceTier) && !serviceTier.includes('[redacted]')) {
+      return { type: 'service_tier', serviceTier };
+    }
+  }
+  return undefined;
 }
 
 const count = (value: unknown): number | undefined =>

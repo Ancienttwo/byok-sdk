@@ -14,7 +14,7 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 import { TestServer } from './fixtures/test-server';
 import { scriptCommand } from './fixtures/script-command';
-import { AGENT_MEMORY_INTENT_CAPABILITY, createEnvelope } from '@byok-sdk/protocol';
+import { AGENT_MEMORY_INTENT_CAPABILITY, HARNESS_SERVICE_TIER_CAPABILITY, createEnvelope } from '@byok-sdk/protocol';
 import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import * as memoryRuntime from '../daemon/agent-memory';
 import { CursorStore } from '../daemon/cursor-store';
@@ -110,6 +110,7 @@ describe('conn.hello harnesses', () => {
     const runtimes = hello.payload.harnesses ?? [];
     expect(hello.payload.capabilities).toContain('toolset-selection');
     expect(hello.payload.capabilities).toContain('input-images');
+    expect(hello.payload.capabilities).toContain(HARNESS_SERVICE_TIER_CAPABILITY);
     expect(hello.payload.configuredToolsets).toEqual(['crm.readonly', 'salesko.connectors']);
     expect(JSON.stringify(hello.payload)).not.toContain('/private/device/salesko-connector');
     expect(JSON.stringify(hello.payload)).not.toContain('/private/device/crm-connector');
@@ -160,6 +161,10 @@ describe('conn.hello harnesses', () => {
       preparedLane: false,
       isolation: { userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false, userMcpServers: false, sessionPersistence: false },
     });
+
+    for (const id of ['codex', 'claude']) expect(byId.get(id)).toMatchObject({ serviceTier: true, serviceTierFallback: true });
+    expect(byId.get('pi')).not.toHaveProperty('serviceTier');
+    expect(byId.get('pi')).not.toHaveProperty('serviceTierFallback');
 
     // The wire value remains adapter-generated. The shipped adapters all
     // report false after removal of Claude's private interactive approval lane.

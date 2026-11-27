@@ -41,6 +41,20 @@ SDK. Rebuild Node SEA launchers with a supported Node executable.
 - Import `checkSuggestedRuntimeVersion` from `@byok-sdk/client` to show an advisory for an installed runtime below OAR's suggested minimum for recent models. Pass the SDK runtime ID from the observation, such as `agy` for Antigravity. The check returns advice under that ID and uses the bundled `suggestedRuntimeVersions` snapshot by default.
 - The Host may fetch `SUGGESTED_RUNTIME_VERSIONS_URL` on its own schedule, pass the decoded JSON through `parseSuggestedRuntimeVersions`, and supply a valid manifest to the check. The SDK performs the comparison offline. Compatibility floors, Host version policy, and the `required` and `available` upgrade states retain their existing meanings.
 
+## Host-selected service tier (#2523)
+
+- To select a tier, check for `harness-service-tier` and
+  `harnesses[].capabilities.serviceTier` on the intended Codex or Claude
+  harness. Set `target.serviceTier` to `fast` or `default`. Codex also accepts
+  native tier IDs advertised by the chosen model.
+- Set `target.serviceTierFallback: 'default'` only if the same harness also
+  advertises `serviceTierFallback` and standard service is acceptable. Both
+  adapters verify the applied tier before the first prompt and report it as a
+  `service_tier` activity event. A device that reconnects without the required
+  support declines the queued offer before starting it.
+- The wire major stays at v8. Offers that omit both fields continue to use
+  the runtime's configured tier.
+
 ## OAR 0.136.0 (#2512, #2513)
 
 - `OpenCodeAdapter.listModels()` on OpenCode 2.x reads the catalog from a private `opencode serve --stdio` loopback listener instead of `opencode models --standalone`. Entries now carry `displayName`, `provider` and `effortLevels`, and a cold catalog no longer comes back id-only. The listener is stopped when the read ends, is cancelled or times out. On OpenCode 1.x and 2.x, `effortLevels` no longer lists the native `default` variant. No Host action.

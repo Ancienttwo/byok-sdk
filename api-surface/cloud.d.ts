@@ -444,6 +444,9 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"turn_end">;
     }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"service_tier">;
+        serviceTier: z.ZodString;
+    }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"error">;
         message: z.ZodString;
         agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -547,6 +550,9 @@ export declare const TimelineEventSchema: z.ZodObject<{
         contentType: z.ZodString;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"turn_end">;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"service_tier">;
+        serviceTier: z.ZodString;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"error">;
         message: z.ZodString;
@@ -725,6 +731,8 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                 modelId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>], "mode">;
             effort: z.ZodOptional<z.ZodString>;
+            serviceTier: z.ZodOptional<z.ZodString>;
+            serviceTierFallback: z.ZodOptional<z.ZodLiteral<"default">>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;
@@ -861,6 +869,8 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                 modelId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>], "mode">;
             effort: z.ZodOptional<z.ZodString>;
+            serviceTier: z.ZodOptional<z.ZodString>;
+            serviceTierFallback: z.ZodOptional<z.ZodLiteral<"default">>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;

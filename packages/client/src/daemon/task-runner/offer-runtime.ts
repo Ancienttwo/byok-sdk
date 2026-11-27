@@ -319,6 +319,8 @@ function descriptorSupportsTarget(descriptor: RuntimeAdapterDescriptor, target: 
     selectionModes: descriptor.selectionModes,
     defaultModelModes: descriptor.defaultModelModes,
     effort: descriptor.supportsEffort === true,
+    serviceTier: descriptor.supportsServiceTier === true,
+    serviceTierFallback: descriptor.supportsServiceTierFallback === true,
     byokProviderId: descriptor.byokProviderId,
   } }, target);
 }
@@ -369,7 +371,8 @@ export async function pickAdapter(
       return { ok: false, code: 'invalid_request', reason: 'the requested harness selection requires a model ID', retryable: false };
     }
     if (harness === undefined || !harnessSupportsTarget(harness, target) || !descriptorSupportsTarget(descriptor, target)) {
-      return { ok: false, reason: `runtime "${requestedRuntime}" has no advertised support for the requested selection or effort`, retryable: false };
+      const requested = target.serviceTier === undefined ? 'selection or effort' : 'selection or service tier';
+      return { ok: false, reason: `runtime "${requestedRuntime}" has no advertised support for the requested ${requested}`, retryable: false };
     }
     const unmet = unmetRequirements(descriptor, requirements);
     if (unmet.length > 0) {

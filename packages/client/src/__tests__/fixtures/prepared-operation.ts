@@ -29,6 +29,8 @@ export interface PreparedOperationResources {
    * authority and this is the swapped-in one.
    */
   startMcpToolsetTools?: McpToolsetToolObservation;
+  /** Test a start whose sealed tier options differ from the admitted offer. */
+  startTierOptions?: Pick<RuntimeTaskInput, 'serviceTier' | 'serviceTierFallback'>;
   approvalChannel?: ApprovalChannel;
   toolAuthorization?: import('../../tool-authorization').ToolAuthorizationGate;
   /** Seals a `memory-reader` Agent manifest whose run directory is `workspaceDir`. */
@@ -62,6 +64,9 @@ export async function startPreparedOperation(
     requiredToolsetIds: [],
     selection: offerSelection(offer.target),
     effort: offer.effort,
+    serviceTier: offer.serviceTier,
+    serviceTierFallback: offer.serviceTierFallback,
+    ...resources.startTierOptions,
     ...(offer.sessionRef === undefined ? {} : { sessionRef: offer.sessionRef }),
     ...(resources.agentHome === undefined ? {} : {
       agentRef: { agentId: 'adapter-unit-agent', profileRevision: 'r1' },

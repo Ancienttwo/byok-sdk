@@ -73,6 +73,48 @@
         "export:@byok-sdk/client#parseSuggestedRuntimeVersions",
         "export:@byok-sdk/client#suggestedRuntimeVersions"
       ]
+    },
+    {
+      "id": "harness-service-tier",
+      "impact": "additive",
+      "summary": "Wire v8 Hosts can request a service tier and authorize default-tier fallback on Codex and Claude. Check device and harness support, and read the applied tier in task activity.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-selected-service-tier-2523",
+      "items": [
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client#RuntimeOperationManifest",
+        "export:@byok-sdk/client#RuntimeTaskInput",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+        "export:@byok-sdk/cloud#ActivityAppendRequestSchema",
+        "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#TimelineEventSchema",
+        "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+        "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
+        "export:@byok-sdk/protocol#AgentEventSchema",
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#ConnHelloPayload",
+        "export:@byok-sdk/protocol#ExecutionTargetSchema",
+        "export:@byok-sdk/protocol#HARNESS_SERVICE_TIER_CAPABILITY",
+        "export:@byok-sdk/protocol#HARNESS_SERVICE_TIER_MAX_LENGTH",
+        "export:@byok-sdk/protocol#HARNESS_SERVICE_TIER_TOKEN",
+        "export:@byok-sdk/protocol#HarnessInfo",
+        "export:@byok-sdk/protocol#HarnessInventorySchema",
+        "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
+        "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#TaskProgressPayloadSchema",
+        "export:@byok-sdk/protocol#harnessSupportsTarget",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_MAX_LENGTH",
+        "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_TOKEN",
+        "union:agent-event#service_tier"
+      ]
     }
   ],
   "changes": [

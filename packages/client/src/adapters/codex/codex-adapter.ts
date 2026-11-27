@@ -194,6 +194,8 @@ export class CodexAdapter implements RuntimeAdapter {
     id: 'codex',
     selectionModes: ['device-default', 'subscription'],
     supportsEffort: true,
+    supportsServiceTier: true,
+    supportsServiceTierFallback: true,
     progressMessageBoundary: 'event',
     platforms: ['darwin', 'linux', 'win32'],
     mcpToolApprovals: true,
@@ -307,7 +309,7 @@ export class CodexAdapter implements RuntimeAdapter {
   async prepare(
     input: RuntimeAdapterPrepareInput,
   ): Promise<RuntimeAdapterPrepareResult> {
-    const { effort } = input.offer;
+    const { effort, serviceTier, serviceTierFallback } = input.offer;
     let model: string | undefined;
     try {
       model = subscriptionModel(offerSelection(input.offer.target));
@@ -371,7 +373,7 @@ export class CodexAdapter implements RuntimeAdapter {
           admittedLaunch = launch;
           return launch;
         } }),
-        start: start => this.start(start, invocation, model, effort, mcpAllowlistSupported, admittedLaunch),
+        start: start => this.start(start, invocation, model, { effort, serviceTier, serviceTierFallback }, mcpAllowlistSupported, admittedLaunch),
       },
     };
   }
@@ -435,14 +437,16 @@ export class CodexAdapter implements RuntimeAdapter {
     input: RuntimeOperationStartInput,
     invocation: RuntimeInvocation,
     model: string | undefined,
-    effort: string | undefined,
+    executionOptions: Pick<RuntimeTaskInput, 'effort' | 'serviceTier' | 'serviceTierFallback'>,
     mcpAllowlistSupported: boolean,
     admittedLaunch: CodexAppServerLaunch | undefined,
   ): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('codex requires a resolved instruction');
     assertCodexMcpHubQualified(input);
-    if (subscriptionModel(input.manifest.selection) !== model || input.manifest.effort !== effort)
+    const { effort, serviceTier, serviceTierFallback } = executionOptions;
+    if (subscriptionModel(input.manifest.selection) !== model || input.manifest.effort !== effort
+      || input.manifest.serviceTier !== serviceTier || input.manifest.serviceTierFallback !== serviceTierFallback)
       throw authority(
         'prepared codex operation received a manifest with different runtime selection',
       );
@@ -466,7 +470,7 @@ export class CodexAdapter implements RuntimeAdapter {
       input.scratch,
       workspace,
       model,
-      effort,
+      executionOptions,
       this.interruptTimeoutMs,
       this.options.operationTimeoutMs ?? DEFAULT_OPERATION_MS,
       input.manifest.sessionRef === undefined,
@@ -502,6 +506,8 @@ export class CodexAdapter implements RuntimeAdapter {
           endTurnProcessesOnAbort: cleanupOnAbort,
           ...(model === undefined ? {} : { model }),
           ...(effort === undefined ? {} : { effort }),
+          ...(serviceTier === undefined ? {} : { serviceTier }),
+          ...(serviceTierFallback === undefined ? {} : { serviceTierFallback }),
           // The shared launch arguments already contain the SDK's sandbox override.
           sandboxMode: 'inherit',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
@@ -561,7 +567,21 @@ export class CodexAdapter implements RuntimeAdapter {
           cause: disposal,
         });
       }
-      throw runtimeStartFailure(session.halted ?? thrown, { classify: oarStartClassifier(codexRuntime), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'codex' });
+      const classify = oarStartClassifier(codexRuntime);
+      throw runtimeStartFailure(session.halted ?? thrown, {
+        classify: error => {
+          // OAR 0.138.1 uses a plain Error for tier readback mismatches. Keep RPC
+          // and transport errors on their existing classification path.
+          const method = input.manifest.sessionRef === undefined ? 'thread/start' : 'thread/resume';
+          if (serviceTier !== undefined && error instanceof Error
+            && error.message.startsWith(`codex ${method} reports serviceTier `)
+            && error.message.endsWith(' was requested')) {
+            return { retry: 'non-retryable', failure: { class: 'invalid_request' } };
+          }
+          return classify(error);
+        },
+        exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'codex',
+      });
     }
   }
 }
@@ -628,7 +648,7 @@ class CodexSession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly workspace: string,
     private readonly model: string | undefined,
-    private readonly effort: string | undefined,
+    private readonly executionOptions: Pick<RuntimeTaskInput, 'effort' | 'serviceTier' | 'serviceTierFallback'>,
     private readonly interruptMs: number,
     private readonly operationMs: number,
     private readonly fresh: boolean,
@@ -771,8 +791,12 @@ class CodexSession implements Session {
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string')
       throw new PolicyUnsupportedError('codex requires a string instruction');
-    if (task.effort !== undefined && task.effort !== this.effort) {
+    if (task.effort !== undefined && task.effort !== this.executionOptions.effort) {
       throw new PolicyUnsupportedError('codex persistent session cannot change effort');
+    }
+    if ((task.serviceTier !== undefined || task.serviceTierFallback !== undefined)
+      && (task.serviceTier !== this.executionOptions.serviceTier || task.serviceTierFallback !== this.executionOptions.serviceTierFallback)) {
+      throw new PolicyUnsupportedError('codex persistent session cannot change service tier or fallback');
     }
     const model = subscriptionModel(offerSelection(task.target));
     if (model !== undefined && model !== this.model)

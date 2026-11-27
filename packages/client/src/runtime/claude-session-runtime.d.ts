@@ -15,6 +15,10 @@ export interface ClaudeControl {
 /** The vendored stream-json AdapterSession, narrowed to what the SDK calls. Claude `steer` stays off. */
 export declare function claudeSessionCapabilities(): { readonly steer: true; readonly images: true };
 
+export declare function claudeServiceTierSettings(requested: string | undefined): Record<string, unknown>;
+export declare function claudeServiceTierRefusal(requested: string, answer: Record<string, unknown>, fallback?: 'default'): string | null;
+export declare function claudeServiceTierEvents(message: Record<string, unknown>): readonly unknown[];
+
 export interface RawClaudeSession {
   readonly id: string;
   readonly capabilities: { readonly images: boolean };

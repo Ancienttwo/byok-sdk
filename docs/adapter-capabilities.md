@@ -1469,12 +1469,26 @@ than `maxRetainedBytes` of frame payload arrives between a failed
 falls back to text classification and can be less specific than
 `input_too_large`.
 
-## Codex model catalog service tiers
+## Codex and Claude service tiers
 
-`CodexAdapter.listModels()` can return optional `serviceTierDetails` on each
-model. The array follows `serviceTiers` order and carries the native tier
-`id`, with `displayName` and `description` when Codex supplies them.
-An unreported menu leaves both arrays absent.
+Both adapters declare `supportsServiceTier` and `supportsServiceTierFallback`.
+The daemon publishes those as optional bits on the named harness and publishes
+the `harness-service-tier` device flag when at least one selectable harness
+supports it. Other adapters omit both bits.
+
+Codex passes the exact tier to `thread/start` or `thread/resume` and verifies
+the reply. Use `fast`, `default`, or a native tier ID offered by the model.
+`CodexAdapter.listModels()` can return optional `serviceTierDetails` in
+`serviceTiers` order with native labels and descriptions when available. Claude
+accepts `fast` and `default`, sets its process-local `fastMode` setting, and
+reads `fast_mode_state` from the SDK initialization reply. Claude's model
+catalog lists `fast` when the model reports fast mode support.
+
+`serviceTierFallback: 'default'` permits Codex's explicit default tier or
+Claude's `off` or `cooldown` report for a requested `fast` tier. A missing or
+unacceptable applied-tier readback fails start before the first prompt.
+`service_tier` activity reports the applied tier and subsequent native tier
+updates.
 
 ## Selection and platforms
 

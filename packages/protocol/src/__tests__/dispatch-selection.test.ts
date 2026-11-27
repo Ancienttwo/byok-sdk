@@ -101,6 +101,24 @@ describe('executor admission', () => {
     expect(harnessSupportsTarget(agy!, { ...google, effort: 'high' })).toBe(false);
   });
 
+  it('requires both per-harness declarations when the Host allows a tier fallback', () => {
+    const standard = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
+    const fast = { ...standard, serviceTier: 'fast' };
+    const fallback = { ...fast, serviceTierFallback: 'default' } as const;
+    const [legacy, tier, both, fallbackOnly] = HarnessInventorySchema.parse([
+      { id: 'legacy', capabilities: { selectionModes: ['device-default'], effort: true } },
+      { id: 'tier', capabilities: { selectionModes: ['device-default'], effort: true, serviceTier: true } },
+      { id: 'both', capabilities: { selectionModes: ['device-default'], effort: true, serviceTier: true, serviceTierFallback: true } },
+      { id: 'fallback-only', capabilities: { selectionModes: ['device-default'], effort: true, serviceTier: false, serviceTierFallback: true } },
+    ]).map(item => ({ ...item, id: 'codex' }));
+    expect(harnessSupportsTarget(legacy!, standard)).toBe(true);
+    expect(harnessSupportsTarget(legacy!, fast)).toBe(false);
+    expect(harnessSupportsTarget(tier!, fast)).toBe(true);
+    expect(harnessSupportsTarget(tier!, fallback)).toBe(false);
+    expect(harnessSupportsTarget(both!, fallback)).toBe(true);
+    expect(harnessSupportsTarget(fallbackOnly!, fallback)).toBe(false);
+  });
+
   it('rejects a BYOK declaration without a provider id', () => {
     expect(HarnessInventorySchema.safeParse([{ id: 'agy', capabilities: { selectionModes: ['byok'], effort: false } }]).success).toBe(false);
   });

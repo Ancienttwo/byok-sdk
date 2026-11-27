@@ -12,6 +12,7 @@ import * as v7Release from 'byok-protocol-previous';
 
 import {
   ExecutionTargetSchema,
+  HARNESS_SERVICE_TIER_CAPABILITY,
   ReasoningEffortSchema,
   readDeclineCode,
   HostOfferPlainPayloadSchema,
@@ -68,6 +69,11 @@ function decoderWithout(row: OfferRow, payload: Json): z.ZodType {
   const { shape } = payload.sealing === undefined ? TaskOfferPlainPayloadSchema : TaskOfferSealedPayloadSchema;
   const top = row.field.split('.')[0]!;
   const { [top]: known, ...rest } = shape as Record<string, z.ZodType>;
+  if (row.capability === HARNESS_SERVICE_TIER_CAPABILITY) {
+    const [auto, harness] = ExecutionTargetSchema.options;
+    const { serviceTier: _serviceTier, serviceTierFallback: _serviceTierFallback, ...legacyHarness } = harness.shape;
+    return z.strictObject({ ...rest, target: z.discriminatedUnion('lane', [auto, z.strictObject(legacyHarness)]) });
+  }
   if (row.value === undefined) return z.strictObject(rest);
   if (row.field === 'agentMemory') {
     return z.strictObject({ ...rest, agentMemory: AgentMemorySelectionSchema.exclude([row.value as never]).optional() });
@@ -142,6 +148,31 @@ describe('per-task execution options (#2377)', () => {
       expect(payload.target).toEqual(target);
       expect(requiredReceiverCapabilities('task.offer', payload)).not.toContain('task-execution-options');
     }
+  });
+});
+
+describe('harness service tier (#2523)', () => {
+  const target = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } };
+
+  it.each(['fast', 'default', 'vendor:next', 'a'.repeat(64)])('accepts the tier token %j and gates either field', serviceTier => {
+    for (const options of [{ serviceTier }, { serviceTier, serviceTierFallback: 'default' }]) {
+      const value = { ...target, ...options };
+      expect(ExecutionTargetSchema.parse(value)).toEqual(value);
+      expect(requiredReceiverCapabilities('task.offer', { target: value })).toEqual(['agent-home-contract', HARNESS_SERVICE_TIER_CAPABILITY]);
+    }
+  });
+
+  it.each(['', 'a'.repeat(65), ' fast', 'fast mode', 'fast\n', 'é', '\x7f'])('refuses the invalid tier token %j', serviceTier => {
+    expect(ExecutionTargetSchema.safeParse({ ...target, serviceTier }).success).toBe(false);
+  });
+
+  it.each([
+    { ...target, serviceTierFallback: 'default' },
+    { ...target, serviceTier: 'fast', serviceTierFallback: 'fast' },
+    { lane: 'auto', serviceTier: 'fast' },
+    { lane: 'auto', serviceTierFallback: 'default' },
+  ])('refuses invalid tier selection %j', value => {
+    expect(ExecutionTargetSchema.safeParse(value).success).toBe(false);
   });
 });
 

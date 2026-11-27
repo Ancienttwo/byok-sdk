@@ -1,4 +1,4 @@
-import { BASE_CONTENT_TYPES as contentTypes, objectRecord as record } from '../shared-rules.js';
+import { BASE_CONTENT_TYPES as contentTypes, objectRecord as record, projectedServiceTier } from '../shared-rules.js';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
@@ -95,7 +95,12 @@ export class CodexProjection {
     input: CodexRecord,
   ): readonly CodexEvent[] {
     const body = record(input.body);
-    if (input.kind !== 'frame' || body?.origin !== 'byok-native') return [];
+    if (input.kind !== 'frame' || body === undefined) return [];
+    if (body.origin !== 'byok-native') {
+      const tier = input.agentPath.length === 0 && input.sessionId === this.rootThreadId && body.byokRoot !== false
+        ? projectedServiceTier(body.events) : undefined;
+      return tier === undefined ? [] : [tier];
+    }
     const params = record(body.native) ?? {};
     const method = body.type;
     const sessionId =

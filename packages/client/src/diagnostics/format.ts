@@ -43,6 +43,8 @@ export function formatAgentEvent(event: AgentEvent): string {
       return `artifact: ${event.name} (${event.contentType})`;
     case 'turn_end':
       return 'turn_end';
+    case 'service_tier':
+      return `service_tier: ${event.serviceTier}`;
     case 'error':
       return `error: ${quote(event.message)}`;
     case 'subagent_start':

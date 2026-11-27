@@ -301,6 +301,7 @@ The `WireAddition` table covers server-to-daemon capability flags and uses
 | `messageEgress` | `agent-message-egress` |
 | `session.mode: 'fresh'` | `agent-egress-fresh-session` |
 | `preparation` | `agent-input-preparation-v9` |
+| `target.serviceTier` or `target.serviceTierFallback` | `harness-service-tier` |
 | `sealing` | `sealed-payload-v1` (generated from the split table, §2.5) |
 | `sealing.categories` includes `agent-message` or `memory-projection` | `sealed-payload-v2` |
 
@@ -803,7 +804,10 @@ Every offer requires one strict target.
 ```ts
 type ExecutionTarget =
   | { lane: 'auto' }
-  | { lane: 'harness'; harnessId: string; selection: HarnessSelection; effort?: string };
+  | {
+      lane: 'harness'; harnessId: string; selection: HarnessSelection;
+      effort?: string; serviceTier?: string; serviceTierFallback?: 'default';
+    };
 ```
 
 An explicit target must match an entry in the destination device's last
@@ -812,6 +816,21 @@ accepted `conn.hello.harnesses`, including its selection mode and support for
 The daemon checks its acknowledged inventory and current availability before
 claiming. For `auto`, the daemon applies its device preference to advertised
 executors that support `device-default`.
+
+`serviceTier` is a 1–64 character printable ASCII token with no whitespace.
+`serviceTierFallback: 'default'` requires `serviceTier`. Both plain and sealed
+offers check the device flag `harness-service-tier` and the named harness's
+matching `capabilities.serviceTier` and `capabilities.serviceTierFallback` bits
+for the fields present. Each bit is optional in discovery. Older wire v8 servers
+read the hello and presence and strip the two bits. A queued offer whose device
+no longer advertises the required support is declined before claim.
+
+Codex and Claude verify the effective tier before sending the first prompt. An
+explicit fallback permits an applied `default` report from the same runtime.
+An open reply that omits the tier or reports a different tier outside the
+authorized fallback fails with non-retryable `invalid_request`. The daemon
+reports applied tiers as `{ type: 'service_tier', serviceTier }` in
+`task.progress`. Older v8 readers accept this as an unknown activity event.
 
 | Selection mode | Additional fields | Authority |
 | --- | --- | --- |
@@ -4617,7 +4636,7 @@ an already delivered identity is refused even after mailbox retention.
   descriptors. Each has an ID, optional version, and capabilities including
   supported selection modes. The authenticated hello replaces the previous
   device snapshot. It carries no credentials, environment values or paths.
-- `target: { lane: 'harness', harnessId, selection, effort? }` identifies the
+- `target: { lane: 'harness', harnessId, selection, effort?, serviceTier?, serviceTierFallback? }` identifies the
   requested harness and configuration. The Host checks the device’s advertised
   inventory before reserving an attempt. `auto` lets the device choose among
   advertised harnesses that support `device-default`.

@@ -1,11 +1,11 @@
-import type { RuntimeTaskInput } from '../types';
+import type { RuntimeAdapter, RuntimeTaskInput } from '../types';
 import { echoedTestAgentRef, freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { createEnvelope, steerRefusalEnvelopeId } from '@byok-sdk/protocol';
+import { HARNESS_SERVICE_TIER_CAPABILITY, createEnvelope, steerRefusalEnvelopeId } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
@@ -35,8 +35,9 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
   });
 
   async function setupDaemon(
-    adapter: StubRuntimeAdapter,
+    adapter: RuntimeAdapter,
     configOverrides: Partial<Parameters<typeof createDaemonWithAdapters>[0]> = {},
+    pair = true,
   ): Promise<Daemon> {
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
@@ -50,10 +51,47 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       },
       [adapter],
     );
-    await daemon.pair('pairing-code');
+    if (pair) await daemon.pair('pairing-code');
     await daemon.start();
     return daemon;
   }
+
+  it('declines a queued fast offer when the same device reconnects without tier support', async () => {
+    const storeDir = await tmpDir('byok-service-tier-reconnect-');
+    const agentHome = testAgentHomeConfig();
+    const original = new StubRuntimeAdapter('codex');
+    await setupDaemon({
+      descriptor: { ...original.descriptor, supportsServiceTier: true, supportsServiceTierFallback: true },
+      detect: () => original.detect(), runtimeEnvironment: () => original.runtimeEnvironment(), prepare: input => original.prepare(input),
+    }, { storeDir, agentHome });
+    const hello = await server.waitFor(e => e.type === 'conn.hello' && e.payload.capabilities.includes(HARNESS_SERVICE_TIER_CAPABILITY));
+    if (hello.type !== 'conn.hello') throw new Error('expected conn.hello');
+    expect(hello.payload.harnesses?.find(h => h.id === 'codex')?.capabilities).toMatchObject({ serviceTier: true, serviceTierFallback: true });
+    await daemon!.stop();
+
+    const agentRef = freshTestAgentRef();
+    const target = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
+    server.send(createEnvelope('task.offer', { ...FRESH_OFFER, agentRef, instruction: 'use fast',
+      target: { ...target, serviceTier: 'fast', serviceTierFallback: 'default' },
+    }, { taskId: 'queued-fast', seq: server.nextSeq() }));
+    const replacement = new StubRuntimeAdapter('codex');
+    const prepare = vi.spyOn(replacement, 'prepare');
+    await setupDaemon(replacement, { storeDir, agentHome }, false);
+    const reconnected = await server.waitFor(e => e.type === 'conn.hello' && e.payload.deviceId === hello.payload.deviceId
+      && !e.payload.capabilities.includes(HARNESS_SERVICE_TIER_CAPABILITY));
+    expect(reconnected.payload).toMatchObject({ harnesses: [{ id: 'codex' }] });
+    const decline = await server.waitFor(e => e.type === 'task.decline' && e.task_id === 'queued-fast');
+    expect(decline.payload).toMatchObject({ code: 'offer_capability_missing', retryable: false });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(replacement.startCalls).toHaveLength(0);
+
+    server.send(createEnvelope('task.offer', { ...FRESH_OFFER, agentRef, instruction: 'continue', target },
+      { taskId: 'tierless', seq: server.nextSeq() }));
+    await server.waitFor(e => e.type === 'task.started' && e.task_id === 'tierless');
+    expect(replacement.startCalls).toHaveLength(1);
+    replacement.sessions[0]!.emit({ type: 'turn_end' });
+    await server.waitFor(e => e.type === 'task.complete' && e.task_id === 'tierless');
+  });
 
   it('runs offer -> claim -> started -> progress -> complete', async () => {
     const adapter = new StubRuntimeAdapter();

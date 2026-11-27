@@ -1144,6 +1144,8 @@ export interface PresenceRuntimeCapabilities {
     readonly selectionModes: readonly string[];
     readonly defaultModelModes?: readonly ('byok' | 'adapter-model' | 'byok-profile')[];
     readonly effort: boolean;
+    readonly serviceTier?: boolean;
+    readonly serviceTierFallback?: boolean;
     readonly byokProviderId?: string;
     readonly isolation?: {
         readonly userInstructions?: boolean;
