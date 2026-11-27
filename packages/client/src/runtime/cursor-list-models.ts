@@ -1,7 +1,5 @@
 import { client, methods, PROTOCOL_VERSION, RequestError } from '@agentclientprotocol/sdk';
-import { asRecord, asRecordList } from '../../vendor/oar/223703d/shared/json.js';
-import { acpThoughtLevelOption } from '../../vendor/oar/223703d/shared/acp/model.js';
-import { startAcpProcess, withAcpDeadline } from '../../vendor/oar/223703d/shared/acp/process.js';
+import { acpThoughtLevelOption, asRecord, asRecordList, startAcpProcess, withAcpDeadline } from './acp-vendor.js';
 import { CURSOR_ACP_ARGS, CURSOR_ACP_CLIENT_META } from './cursor-acp-profile.js';
 import type { ModelReader } from './oar-reader-contract.js';
 import type { RuntimeModelEntry } from './runtime-reader-types.js';

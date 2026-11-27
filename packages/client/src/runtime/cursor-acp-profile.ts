@@ -1,8 +1,5 @@
 import { RequestError } from '@agentclientprotocol/sdk';
-import { ModelConfirmationError } from '../../vendor/oar/223703d/contracts/model-confirmation-error.js';
-import { acpReportedModel } from '../../vendor/oar/223703d/shared/acp/model.js';
-import type { AcpSessionProfile } from '../../vendor/oar/223703d/shared/acp/profile.js';
-import { acpSession, type StartAcpSession } from '../../vendor/oar/223703d/shared/acp/session.js';
+import { ModelConfirmationError, acpReportedModel, acpSession, type AcpSessionProfile, type StartAcpSession } from './acp-vendor.js';
 
 export const CURSOR_ACP_ARGS = ['--force', 'acp'] as const;
 export const CURSOR_ACP_CLIENT_META = Object.freeze({ parameterizedModelPicker: true });

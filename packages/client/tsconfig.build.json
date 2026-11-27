@@ -11,6 +11,7 @@
     "src/__tests__",
     "src/**/__tests__",
     "src/adapters/pi/mcp-extension.ts",
+    "src/runtime/acp-vendor.d.ts",
     "src/runtime/cursor-acp-profile.ts",
     "src/runtime/cursor-list-models.ts"
   ]
