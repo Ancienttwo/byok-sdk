@@ -148,13 +148,19 @@ test('A7 harness paths run the Node verifier in the existing targeted job (#605)
   assert.match(targeted, /node scripts\/ci\/run-targeted\.mjs/);
 });
 
-test('the retention soak workflow and harness select only reviewed light checks (#1105)', () => {
+test('the retention soak workflow, harness and smoke select only CI script checks (#1105)', () => {
   assert.deepEqual(selectImpact(['.github/workflows/client-retention-soak.yml']), {
     dirs: [], files: ['.github/workflows/client-retention-soak.yml'], families: [], reason: 'root-ci-scripts',
   });
   assert.deepEqual(selectImpact(['scripts/soak/client-retention-soak.mjs']), {
     dirs: [], files: ['scripts/soak/client-retention-soak.mjs'], families: [], reason: 'root-ci-scripts',
   });
+  const smoke = 'scripts/soak/client-retention-soak.test.mjs';
+  assert.deepEqual(selectImpact([smoke]), {
+    dirs: [], files: [smoke], families: [], reason: 'root-ci-scripts',
+  });
+  const workflow = readFileSync(new URL('.github/workflows/client-retention-soak.yml', root), 'utf8');
+  assert.ok(workflow.includes(`run: bun test ${smoke}`));
 });
 
 test('the Pi closure definition selects the release pack jobs and its importer\'s jobs; its collector selects only script checks', () => {

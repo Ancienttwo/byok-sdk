@@ -803,9 +803,11 @@ export function selectImpact(paths, context = {}) {
     if (/^scripts\/agent-memory-a7\/(?:(?:bridge|evidence|run|verify|verifier\.test)\.mjs|result\.schema\.json)$/.test(path)) {
       scripts = true; continue;
     }
-    // #1105: the retention soak is a dev-only artifact producer run by its own
-    // workflow, not by a package test suite.
-    if (path === 'scripts/soak/client-retention-soak.mjs') { scripts = true; continue; }
+    // #1105: the dedicated schedule/dispatch workflow runs the soak and its smoke.
+    // Changes to either script select the PR's CI script checks.
+    if (path === 'scripts/soak/client-retention-soak.mjs' || path === 'scripts/soak/client-retention-soak.test.mjs') {
+      scripts = true; continue;
+    }
     // The operator collector writes official-pi-closure.json, which is mapped
     // on its own; nothing runs or imports the collector.
     if (path === 'scripts/release/collect-official-pi-closure.mjs') { scripts = true; continue; }
