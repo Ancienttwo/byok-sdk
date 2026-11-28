@@ -6,12 +6,14 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
+import type { ContentHash } from '@byok-sdk/core';
 import type {
   AgentEvent,
   DefaultModelSelectionMode,
   ExecutionTarget,
   HarnessSelection,
   SelectionMode,
+  SkillId,
   TaskDeclineCode,
   TaskOfferPlainPayload,
 } from '@byok-sdk/protocol';
@@ -274,6 +276,76 @@ export interface McpToolsetReloadReceipt {
   revision: string;
   changed: boolean;
   toolsets: readonly Readonly<McpToolsetStatus>[];
+}
+
+/**
+ * One configured local skill source behind a logical `SkillId`.
+ * Strict closed union: either an absolute path to a `SKILL.md` file or skill
+ * directory, or an installed skill-pack name in the daemon's store.
+ */
+export type SkillSource =
+  | { readonly path: string }
+  | { readonly pack: string };
+
+/** Content-addressed status for one verified skill in the local registry. */
+export interface SkillEntryStatus {
+  readonly id: SkillId;
+  readonly source: SkillSource;
+  readonly name: string;
+  readonly description: string;
+  readonly contentHash: ContentHash;
+  readonly packVersion?: string;
+  readonly status: 'verified';
+}
+
+/** Content-addressed status of the daemon's local skill registry (in-process; carries configured sources and descriptions). */
+export interface SkillRegistryStatus {
+  readonly revision: string;
+  readonly configuredSkills: readonly SkillId[];
+  readonly skills: readonly Readonly<SkillEntryStatus>[];
+}
+
+/** Receipt returned after an atomic, expected-revision skill registry reload (in-process). */
+export interface SkillReloadReceipt {
+  readonly previousRevision: string;
+  readonly revision: string;
+  readonly changed: boolean;
+  readonly configuredSkills: readonly SkillId[];
+  readonly skills: readonly Readonly<SkillEntryStatus>[];
+}
+
+/** Compact, redacted status for one verified skill carried over local control IPC. */
+export interface ControlSkillEntryStatus {
+  readonly id: SkillId;
+  readonly sourceKind: 'path' | 'pack';
+  readonly name: string;
+  readonly contentHash: ContentHash;
+  readonly packVersion?: string;
+  readonly status: 'verified';
+}
+
+/** Compact, redacted, content-addressed status of the daemon's local skill registry for control IPC. */
+export interface ControlSkillRegistryStatus {
+  readonly revision: string;
+  readonly configuredSkills: readonly SkillId[];
+  readonly skills: readonly Readonly<ControlSkillEntryStatus>[];
+}
+
+/** Compact, redacted receipt returned after a control-socket `skills.reload`. */
+export interface ControlSkillReloadReceipt {
+  readonly previousRevision: string;
+  readonly revision: string;
+  readonly changed: boolean;
+  readonly configuredSkills: readonly SkillId[];
+  readonly skills: readonly Readonly<ControlSkillEntryStatus>[];
+}
+
+/** One skill projected by copy into a task-scoped directory before claim. */
+export interface ProjectedSkill {
+  readonly id: SkillId;
+  readonly name: string;
+  readonly description: string;
+  readonly dir: string;
 }
 
 /**

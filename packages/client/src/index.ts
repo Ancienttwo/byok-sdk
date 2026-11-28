@@ -32,6 +32,14 @@ export type {
   McpToolsetStatus,
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
+  SkillSource,
+  SkillEntryStatus,
+  SkillRegistryStatus,
+  SkillReloadReceipt,
+  ControlSkillEntryStatus,
+  ControlSkillRegistryStatus,
+  ControlSkillReloadReceipt,
+  ProjectedSkill,
   AgentEgressPolicy,
 } from './types.js';
 export type { AgentRef } from './agent-home.js';
@@ -158,6 +166,10 @@ export {
   type DaemonEffectiveToolAuthorization,
   type DaemonMemoryHelperResolution,
 } from './daemon/config-schema/index.js';
+export type {
+  DaemonEffectiveSkill,
+  DaemonEffectiveSkills,
+} from './daemon/config-schema/effective.js';
 export {
   DaemonJournalProtocolUnsupportedError,
   DeviceStoreBindingMismatchError,
@@ -261,6 +273,25 @@ export {
   McpToolsetRevisionConflictError,
   McpToolsetDefinitionRevisionConflictError,
 } from './daemon/toolset-registry.js';
+export {
+  SKILL_REGISTRY_ERROR_CODES,
+  SkillRegistry,
+  SkillRegistryError,
+  SkillRevisionConflictError,
+} from './daemon/skill-registry.js';
+export type {
+  PinnedSkillFile,
+  ResolvedSkillSnapshot,
+  SkillConfigInput,
+  SkillRegistryErrorCode,
+  SkillRegistryOptions,
+  SkillRegistrySnapshot,
+} from './daemon/skill-registry.js';
+export {
+  SKILL_PROJECTION_INTEGRITY_REASONS,
+  SkillProjectionIntegrityError,
+} from './daemon/skill-projection.js';
+export type { SkillProjectionIntegrityReason } from './daemon/skill-projection.js';
 export type { ProgressBatcherOptions } from './daemon/progress-batcher.js';
 
 /**

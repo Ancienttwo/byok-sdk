@@ -13,7 +13,19 @@ import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detect
 import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
 import type { RuntimeEnvironmentReport } from '../runtime/environment.js';
 import type { LocalAgentReleaseIdentity } from '../release-identity.js';
-import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
+import type {
+  ControlSkillEntryStatus,
+  ControlSkillRegistryStatus,
+  ControlSkillReloadReceipt,
+  McpToolsetConfig,
+  McpToolsetRegistryStatus,
+  RuntimeExecutableSource,
+  RuntimeVersionVerdict,
+  SkillEntryStatus,
+  SkillRegistryStatus,
+  SkillReloadReceipt,
+  SkillSource,
+} from '../types.js';
 import type { AgentHomeExecutionStatus } from '../agent-home.js';
 import type {
   InputPreparationAccountingPolicyRefV1,
@@ -285,6 +297,15 @@ export class ControlError extends Error {
 export const MAX_LINE_BYTES = 64 * 1024;
 
 /**
+ * Bound on a single authenticated inbound NDJSON request line's byte length
+ * (1 MiB, matching `control-server.ts`'s `MAX_OUTBOUND_QUEUE_BYTES`). Applied
+ * only after mutual HMAC authentication succeeds (`phase = 'ready'`);
+ * unauthenticated handshake frames and client-side reads remain capped at
+ * {@link MAX_LINE_BYTES} (64 KiB).
+ */
+export const MAX_AUTHENTICATED_REQUEST_LINE_BYTES = 1024 * 1024;
+
+/**
  * Buffers raw socket bytes and yields complete lines. Splits on the raw byte
  * `0x0a` BEFORE any UTF-8 decoding — `0x0A` can only ever appear as an actual newline in
  * valid UTF-8, so this never risks decoding a multi-byte character that
@@ -292,8 +313,24 @@ export const MAX_LINE_BYTES = 64 * 1024;
  */
 export class NdjsonLineReader {
   private pending: Buffer = Buffer.alloc(0);
+  private maxLineBytes: number;
 
-  /** @throws if the still-unterminated remainder exceeds {@link MAX_LINE_BYTES} — see that constant's own doc comment. */
+  constructor(maxLineBytes: number = MAX_LINE_BYTES) {
+    if (!Number.isSafeInteger(maxLineBytes) || maxLineBytes <= 0) {
+      throw new RangeError('NdjsonLineReader maxLineBytes must be a positive safe integer');
+    }
+    this.maxLineBytes = maxLineBytes;
+  }
+
+  /** Adjusts the active unterminated-line byte cap for subsequent reads. */
+  setMaxLineBytes(maxLineBytes: number): void {
+    if (!Number.isSafeInteger(maxLineBytes) || maxLineBytes <= 0) {
+      throw new RangeError('NdjsonLineReader maxLineBytes must be a positive safe integer');
+    }
+    this.maxLineBytes = maxLineBytes;
+  }
+
+  /** @throws if the still-unterminated remainder exceeds the active line-byte cap — see {@link MAX_LINE_BYTES}. */
   push(chunk: Buffer): string[] {
     this.pending = this.pending.length > 0 ? Buffer.concat([this.pending, chunk]) : chunk;
     const lines: string[] = [];
@@ -304,8 +341,8 @@ export class NdjsonLineReader {
       this.pending = this.pending.subarray(newlineIndex + 1);
       if (line.length > 0) lines.push(line);
     }
-    if (this.pending.length > MAX_LINE_BYTES) {
-      throw new Error(`NDJSON line exceeded ${MAX_LINE_BYTES} bytes without a terminating newline`);
+    if (this.pending.length > this.maxLineBytes) {
+      throw new Error(`NDJSON line exceeded ${this.maxLineBytes} bytes without a terminating newline`);
     }
     return lines;
   }
@@ -434,6 +471,8 @@ export interface ControlStatusResult {
   outbound: import('./outbound-settlement.js').OutboundStatus;
   /** Redacted content-addressed status from the daemon's single local registry. */
   toolsets: McpToolsetRegistryStatus;
+  /** Compact, redacted content-addressed status from the daemon's local skill registry. Absent only for an older control peer. */
+  skills?: ControlSkillRegistryStatus;
   /**
    * WP0: per-canonical-Agent-home execution serialization, counts only —
    * see {@link AgentHomeExecutionStatus}. Absent only for an older control
@@ -452,6 +491,42 @@ export interface ControlStatusResult {
 export interface ToolsetsReloadParams {
   expectedRevision: string;
   mcpToolsets: Record<string, McpToolsetConfig>;
+}
+
+export interface SkillsReloadParams {
+  expectedRevision: string;
+  skills: Record<string, SkillSource>;
+}
+
+function toControlSkillEntryStatus(entry: Readonly<SkillEntryStatus>): Readonly<ControlSkillEntryStatus> {
+  return Object.freeze({
+    id: entry.id,
+    sourceKind: 'path' in entry.source ? 'path' : 'pack',
+    name: entry.name,
+    contentHash: entry.contentHash,
+    ...(entry.packVersion === undefined ? {} : { packVersion: entry.packVersion }),
+    status: entry.status,
+  });
+}
+
+/** Projects an in-process skill status into the compact redacted control-IPC shape. */
+export function toControlSkillRegistryStatus(status: SkillRegistryStatus): ControlSkillRegistryStatus {
+  return Object.freeze({
+    revision: status.revision,
+    configuredSkills: status.configuredSkills,
+    skills: Object.freeze(status.skills.map(toControlSkillEntryStatus)),
+  });
+}
+
+/** Projects an in-process skill reload receipt into the compact redacted control-IPC shape. */
+export function toControlSkillReloadReceipt(receipt: SkillReloadReceipt): ControlSkillReloadReceipt {
+  return Object.freeze({
+    previousRevision: receipt.previousRevision,
+    revision: receipt.revision,
+    changed: receipt.changed,
+    configuredSkills: receipt.configuredSkills,
+    skills: Object.freeze(receipt.skills.map(toControlSkillEntryStatus)),
+  });
 }
 
 /** Maximum opaque pairing-code payload accepted over local control IPC. */
@@ -503,6 +578,20 @@ export function parseToolsetsReloadParams(value: unknown): ToolsetsReloadParams 
   return {
     expectedRevision: value.expectedRevision,
     mcpToolsets: value.mcpToolsets as Record<string, McpToolsetConfig>,
+  };
+}
+
+/** Shape-only parser; skill source and content validation remain registry-owned. */
+export function parseSkillsReloadParams(value: unknown): SkillsReloadParams | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'expectedRevision' && key !== 'skills')) {
+    return undefined;
+  }
+  if (typeof value.expectedRevision !== 'string' || !isRecord(value.skills) || Array.isArray(value.skills)) {
+    return undefined;
+  }
+  return {
+    expectedRevision: value.expectedRevision,
+    skills: value.skills as Record<string, SkillSource>,
   };
 }
 

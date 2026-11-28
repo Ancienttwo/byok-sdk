@@ -1364,6 +1364,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `branding.accent` | advanced | string |
 | `codexSandbox` | advanced | "danger-full-access" / "inherit" / "read-only" / "workspace-write" |
 | `mcpToolsets` | advanced | object |
+| `skills` | advanced | object |
 | `dangerouslyAllowInsecureRemote` | advanced | boolean |
 | `maxTaskOutputBytes` | advanced | number |
 | `artifactLimits` | advanced | object |
@@ -1466,6 +1467,7 @@ Manifest transition: **0.47.1 → 0.47.1**. Versions and entries below come from
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
 | cursor-agent-cli | additive | CursorAdapter adds an opt-in Cursor Agent CLI harness on macOS and Linux. It uses the device user's CLI login. Phase 1 has fake-CLI coverage. [Migration](../docs/releases/host-upgrade-next-minor.md#cursor-agent-cli-2514) |
+| task-scoped-skills-registry | additive | @byok-sdk/client adds DaemonConfig.skills, the synchronous bytes-locked SkillRegistry (with SkillRegistryError, SkillRevisionConflictError, and SkillProjectionIntegrityError), Daemon.status().skills, Daemon.reloadSkills, control-socket skills.reload, and redacted effective-config skill reporting. Retention protects pinned skill-pack revisions referenced by the live snapshot. [Migration](../docs/spec.md#local-skill-registry-and-bytes-locked-snapshot) |
 <!-- generated:migrations:end -->
 
 ## Maintaining this guide

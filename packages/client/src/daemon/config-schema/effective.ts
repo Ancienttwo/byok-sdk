@@ -1,4 +1,6 @@
 import path from 'node:path';
+import type { ContentHash } from '@byok-sdk/core';
+import type { SkillId } from '@byok-sdk/protocol';
 import { AGENT_HOME_DIRECTORY } from '../../agent-home.js';
 import {
   AGENT_MEMORY_MCP_SERVER_NAME,
@@ -9,9 +11,10 @@ import {
   parseToolAuthorizationPolicy, toolAuthorizationMode,
   type ToolAuthorizationMode, type ToolFileScope,
 } from '../../tool-authorization.js';
-import type { RuntimeAdapter, RuntimeVersionPolicy } from '../../types.js';
+import type { RuntimeAdapter, RuntimeVersionPolicy, SkillRegistryStatus } from '../../types.js';
 import { serviceLogDir } from '../host-layout.js';
 import { scratchRootSocketBudget } from '../retention/scratch.js';
+import { SkillRegistry } from '../skill-registry.js';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon.js';
 import { DAEMON_CONFIG_SCHEMA_VERSION } from './schema.generated.js';
 import { runtimeEnvironmentFor } from '../../adapters/runtime-adapters.js';
@@ -42,6 +45,21 @@ export interface DaemonEffectiveMcpServer {
   readonly mount: 'per-task' | 'off' | 'unavailable';
   /** Which tasks get it (`per-task`), or why it is never mounted. */
   readonly detail: string;
+}
+
+/** Redacted summary of one configured skill in the effective config report. */
+export interface DaemonEffectiveSkill {
+  readonly id: SkillId;
+  readonly sourceKind: 'path' | 'pack';
+  readonly name: string;
+  readonly contentHash: ContentHash;
+  readonly packVersion?: string;
+}
+
+/** Redacted, content-addressed summary of the daemon's configured skill registry. */
+export interface DaemonEffectiveSkills {
+  readonly revision: string;
+  readonly entries: readonly DaemonEffectiveSkill[];
 }
 
 /** One runtime adapter of this daemon. */
@@ -105,6 +123,7 @@ export interface DaemonEffectiveConfig {
     readonly helper: DaemonMemoryHelperResolution;
   };
   readonly mcpServers: readonly DaemonEffectiveMcpServer[];
+  readonly skills: DaemonEffectiveSkills;
   readonly runtimes: readonly DaemonEffectiveRuntime[];
   readonly toolAuthorization: DaemonEffectiveToolAuthorization;
 }
@@ -142,6 +161,8 @@ export interface EffectiveDaemonConfigInput {
   readonly scratchRoot: string;
   readonly adapters: readonly RuntimeAdapter[];
   readonly runtimeSource: 'sdk-built' | 'injected';
+  /** Already-built skill registry status from daemon construction; omitted callers validate `config.skills` against `storeDir`. */
+  readonly skills?: SkillRegistryStatus;
   readonly platform?: NodeJS.Platform;
 }
 
@@ -236,6 +257,18 @@ export function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput)
     }
   }
 
+  const skillStatus = input.skills ?? new SkillRegistry(config.skills, { dataDir: storeDir }).status();
+  const skills: DaemonEffectiveSkills = {
+    revision: skillStatus.revision,
+    entries: skillStatus.skills.map((entry) => ({
+      id: entry.id,
+      sourceKind: 'path' in entry.source ? 'path' : 'pack',
+      name: entry.name,
+      contentHash: entry.contentHash,
+      ...(entry.packVersion === undefined ? {} : { packVersion: entry.packVersion }),
+    })),
+  };
+
   return {
     schemaVersion: DAEMON_CONFIG_SCHEMA_VERSION,
     directories: {
@@ -251,6 +284,7 @@ export function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput)
     },
     memory: { mcp: input.agentMemoryMcpAdmission, helper },
     mcpServers,
+    skills,
     runtimes: input.adapters.map((adapter) => {
       const id = adapter.descriptor.id;
       const isolation = input.runtimeSource === 'sdk-built' ? sdkBuiltIsolation(id, config) : undefined;
