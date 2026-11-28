@@ -1,3 +1,4 @@
+import { errorText } from "../../statusCopy.ts";
 import { signal } from "nsh";
 import { toBridgeCallError } from "../../bridge.ts";
 
@@ -14,7 +15,10 @@ export function createCommand(): Command {
   const error = signal<string | null>(null);
   return {
     busy: () => busy(),
-    error: () => error(),
+    error: () => {
+      const code = error();
+      return code === null ? null : errorText(code);
+    },
     run: async (command) => {
       busy.set(true);
       error.set(null);
@@ -22,7 +26,7 @@ export function createCommand(): Command {
         await command();
         return true;
       } catch (cause) {
-        error.set(toBridgeCallError(cause).message);
+        error.set(toBridgeCallError(cause).code);
         return false;
       } finally {
         busy.set(false);

@@ -1,3 +1,5 @@
+import { formatNumber, t } from "../i18n.ts";
+import { restartSeconds } from "../statusCopy.ts";
 import { Text, View } from "nsh";
 import type { SupervisedHostState } from "../../../src/bridge/protocol.ts";
 import { cx, HOST_STATE_META, type BadgeVariant } from "./tokens.ts";
@@ -69,16 +71,15 @@ export function HostStateBadge(props: { state: SupervisedHostState | null; testI
   const meta = () => HOST_STATE_META[key()];
   const detailLabel = () => {
     const current = props.state;
-    if (!current) {
-      return "Offline";
-    }
+    if (!current) return t("host.offline");
+    const label = t("host." + current.state);
     if (current.state === "running") {
-      return `${meta().label} (${current.activeWork} active)`;
+      return t("host.activeBadge", { label, count: formatNumber(current.activeWork) });
     }
     if (current.state === "restarting") {
-      return `${meta().label} (${Math.ceil(current.inMs / 1000)}s)`;
+      return t("host.restartBadge", { label, seconds: restartSeconds(current) });
     }
-    return meta().label;
+    return label;
   };
   return (
     <Badge

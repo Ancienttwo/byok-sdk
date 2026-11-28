@@ -1,7 +1,8 @@
+import { t } from "../../i18n.ts";
 import { computed, resource, signal, Text, View } from "nsh";
 import type { ModelChoice } from "../../../../src/host/conversation/catalog.ts";
 import type { BotProfile } from "../../../../src/host/store/types.ts";
-import { toBridgeCallError } from "../../bridge.ts";
+import { bridgeErrorText } from "../../statusCopy.ts";
 import { archiveBot, hostReady, readDevice, saveBot, setActiveSection } from "../../store.ts";
 import { Badge, Button, Card, Dialog, Field, Input, Select, Spinner, Tab, Tabs, Textarea } from "../../ui/index.ts";
 import { runtimeSignInGuidance } from "../settings/runtimeStatus.ts";
@@ -55,7 +56,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
   };
   const deviceFailure = () => {
     const error = device.error();
-    return error === undefined ? null : toBridgeCallError(error).message;
+    return error === undefined ? null : bridgeErrorText(error);
   };
   const availability = (model: ModelChoice) => choiceAvailability(model, device()?.runtimes);
   const selected = () => props.models.find((model) => model.id === profile().model);
@@ -73,7 +74,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
   };
   const signInNote = (runtime: string) => {
     const guidance = runtimeSignInGuidance(runtime);
-    return guidance.kind === "command" ? `${guidance.command}: ${guidance.note}` : guidance.note;
+    return guidance.kind === "command" ? t("common.fact", { label: guidance.command, value: guidance.note }) : guidance.note;
   };
   const complete = () => {
     const current = profile();
@@ -101,15 +102,15 @@ export function ProfileEditor(props: ProfileEditorProps) {
     <Card>
       <View testID="conv-profile" class="gap-4">
         <Text role="header" accessibilityLevel={2} class="text-base font-semibold text-foreground">
-          {props.creating ? "New Bot" : "Edit profile"}
+          {props.creating ? t("profile.new") : t("conversation.edit")}
         </Text>
         <If when={!props.creating}>
-          <Tabs testID="conv-profile-tabs" accessibilityLabel="Bot sheet" class="self-start">
+          <Tabs testID="conv-profile-tabs" accessibilityLabel={t("profile.sheet")} class="self-start">
             <Tab testID="conv-profile-tab-profile" selected={tab() === "profile"} onPress={() => tab.set("profile")}>
-              Profile
+              {t("profile.profile")}
             </Tab>
             <Tab testID="conv-profile-tab-memory" selected={tab() === "memory"} onPress={() => tab.set("memory")}>
-              Memory
+              {t("profile.memory")}
             </Tab>
           </Tabs>
         </If>
@@ -118,46 +119,46 @@ export function ProfileEditor(props: ProfileEditorProps) {
           else={
             <View class="gap-4">
               <BotMemoryPanel botId={props.initial.id} />
-              <View class="flex-row items-center gap-2">
+              <View class="flex-row flex-wrap items-center gap-2">
                 <Button testID="conv-profile-close" variant="outline" onPress={() => props.onDone(undefined)}>
-                  Close
+                  {t("common.close")}
                 </Button>
               </View>
             </View>
           }
         >
           <View class="gap-4">
-            <Field label="Name" required>
+            <Field label={t("profile.name")} required>
               <Input
                 testID="conv-profile-name"
-                accessibilityLabel="Name"
+                accessibilityLabel={t("profile.name")}
                 value={profile().name}
                 onChange={(e) => edit({ name: e.value })}
               />
             </Field>
-            <Field label="Role" required>
+            <Field label={t("profile.role")} required>
               <Input
                 testID="conv-profile-role"
-                accessibilityLabel="Role"
+                accessibilityLabel={t("profile.role")}
                 value={profile().role}
                 onChange={(e) => edit({ role: e.value })}
               />
             </Field>
-            <Field label="Persona" required>
+            <Field label={t("profile.persona")} required>
               <Textarea
                 testID="conv-profile-persona"
-                accessibilityLabel="Persona"
+                accessibilityLabel={t("profile.persona")}
                 value={profile().persona}
                 onChange={(e) => edit({ persona: e.value })}
               />
             </Field>
-            <Field label="Model" required>
+            <Field label={t("profile.model")} required>
               <View class="gap-2">
-                <View class="flex-row items-center gap-2">
+                <View class="flex-row flex-wrap items-center gap-2">
                   <View class="flex-1">
                     <Select
                       testID="conv-profile-model"
-                      accessibilityLabel="Model"
+                      accessibilityLabel={t("profile.model")}
                       items={props.models.map((model) => {
                         const state = availability(model);
                         return {
@@ -182,26 +183,26 @@ export function ProfileEditor(props: ProfileEditorProps) {
                     disabled={!hostReady() || device.loading()}
                     onPress={checkAgain}
                   >
-                    Check again
+                    {t("common.checkAgain")}
                   </Button>
                 </View>
                 <If when={device() === undefined && deviceFailure() === null}>
-                  <View class="flex-row items-center gap-2" accessibilityState={{ busy: true }}>
+                  <View class="flex-row flex-wrap items-center gap-2" accessibilityState={{ busy: true }}>
                     <Spinner />
-                    <Text class="text-xs text-muted-foreground">Checking agents…</Text>
+                    <Text class="text-xs text-muted-foreground">{t("settings.agentsLoading")}</Text>
                   </View>
                 </If>
                 <If when={deviceFailure()}>
                   {(message) => (
                     <View role="alert" testID="conv-profile-agents-error">
-                      <Text class="text-xs text-destructive">{`Agents unavailable: ${message()}`}</Text>
+                      <Text class="text-xs text-destructive">{t("settings.agentsError", { error: message() })}</Text>
                     </View>
                   )}
                 </If>
                 <If when={selectedNotice()}>
                   {(notice) => (
                     <View testID="conv-profile-model-status" class="gap-1">
-                      <View class="flex-row items-center gap-2">
+                      <View class="flex-row flex-wrap items-center gap-2">
                         <Text class="text-xs text-foreground">{notice().model.label}</Text>
                         <Badge
                           testID="conv-profile-model-status-badge"
@@ -219,10 +220,10 @@ export function ProfileEditor(props: ProfileEditorProps) {
                   )}
                 </If>
                 <If when={noneSelectable()}>
-                  <View testID="conv-profile-no-agent" class="flex-row items-center gap-2">
-                    <Text class="flex-1 text-xs text-muted-foreground">No agent can run on this device yet.</Text>
+                  <View testID="conv-profile-no-agent" class="flex-row flex-wrap items-center gap-2">
+                    <Text class="flex-1 text-xs text-muted-foreground">{t("profile.noAgent")}</Text>
                     <Button testID="conv-profile-setup-pi" variant="outline" size="sm" onPress={() => setActiveSection("keys")}>
-                      Set up a Pi key
+                      {t("profile.setupPi")}
                     </Button>
                   </View>
                 </If>
@@ -233,14 +234,14 @@ export function ProfileEditor(props: ProfileEditorProps) {
                 <Text class="text-xs text-destructive">{command.error()}</Text>
               </View>
             </If>
-            <View class="flex-row items-center gap-2">
+            <View class="flex-row flex-wrap items-center gap-2">
               <Button
                 testID="conv-profile-save"
                 loading={command.busy() && !confirmArchive()}
                 disabled={command.busy() || !complete()}
                 onPress={() => void save()}
               >
-                Save
+                {t("common.save")}
               </Button>
               <Button
                 testID="conv-profile-close"
@@ -248,7 +249,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
                 disabled={command.busy()}
                 onPress={() => props.onDone(undefined)}
               >
-                Close
+                {t("common.close")}
               </Button>
               <If when={!props.creating}>
                 <Button
@@ -257,7 +258,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
                   disabled={command.busy()}
                   onPress={() => confirmArchive.set(true)}
                 >
-                  Archive…
+                  {t("profile.archiveAction")}
                 </Button>
               </If>
             </View>
@@ -268,22 +269,22 @@ export function ProfileEditor(props: ProfileEditorProps) {
         testID="conv-archive-dialog"
         role="alertdialog"
         open={confirmArchive()}
-        title="Archive Bot"
-        description="Archiving is permanent: this Bot takes no new work and cannot be restored. Its conversation and home stay readable."
+        title={t("profile.archive")}
+        description={t("profile.archiveDescription")}
         onOpenChange={(open) => {
           if (!command.busy()) {
             confirmArchive.set(open);
           }
         }}
         footer={
-          <View class="flex-row items-center gap-2">
+          <View class="flex-row flex-wrap items-center gap-2">
             <Button
               testID="conv-archive-keep"
               variant="outline"
               disabled={command.busy()}
               onPress={() => confirmArchive.set(false)}
             >
-              Keep Bot
+              {t("profile.keep")}
             </Button>
             <Button
               testID="conv-archive-confirm"
@@ -292,7 +293,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
               disabled={command.busy()}
               onPress={() => void archive()}
             >
-              Archive permanently
+              {t("profile.archivePermanently")}
             </Button>
           </View>
         }

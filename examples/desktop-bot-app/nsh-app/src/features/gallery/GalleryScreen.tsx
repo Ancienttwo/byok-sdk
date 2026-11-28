@@ -1,4 +1,7 @@
+import { t } from "../../i18n.ts";
 import { signal, Text, View } from "nsh";
+import { addTranslations } from "nsh/i18n";
+import translations from "./translations.json";
 import brand from "../../../../brand.config.ts";
 import { BridgeCallError, submitSecret } from "../../bridge.ts";
 import { openAllowedExternalUrl } from "../../links.ts";
@@ -47,8 +50,12 @@ const RUNTIME_ITEMS = [
   { value: "codex", title: "Codex" },
 ];
 
+export function loadGalleryTranslations(): void {
+  addTranslations(translations);
+}
+
 export interface GalleryScreenProps {
-  onNotify: (tone: ToastNotice["tone"], title: string, description?: string) => void;
+  onNotify: (tone: ToastNotice["tone"], title: ToastNotice["title"], description?: ToastNotice["description"]) => void;
 }
 
 /**
@@ -65,7 +72,7 @@ export function GalleryScreen(props: GalleryScreenProps) {
   const standardInput = signal("");
   const notesInput = signal("");
   const secretValue = signal("");
-  const secretStatus = signal("Not submitted");
+  const secretStatus = signal<() => string>(() => t("gallery.secretPending"));
   const secretSubmitting = signal(false);
 
   const autosaveEnabled = signal(true);
@@ -80,7 +87,7 @@ export function GalleryScreen(props: GalleryScreenProps) {
   const menuOpen = signal(false);
   const popoverOpen = signal(false);
   const menuSelection = signal("None");
-  const linkStatus = signal("Ready");
+  const linkStatus = signal<() => string>(() => t("gallery.linkReady"));
 
   const handleSubmitSecret = async () => {
     if (!secretValue() || secretSubmitting()) {
@@ -96,12 +103,12 @@ export function GalleryScreen(props: GalleryScreenProps) {
           secret: secretValue(),
         }),
       });
-      secretStatus.set("Submitted (signal cleared before bridge call)");
-      props.onNotify("success", "Credential submitted", "Cleared reactive input signal before bridge handoff.");
+      secretStatus.set(() => t("gallery.secretSubmitted"));
+      props.onNotify("success", () => t("gallery.credentialSubmitted"), () => t("gallery.credentialDescription"));
     } catch (error) {
       const code = error instanceof BridgeCallError ? error.code : "method_failed";
-      secretStatus.set(`Bridge error (${code})`);
-      props.onNotify("warning", "Bridge unavailable in preview", `Code: ${code}`);
+      secretStatus.set(() => t("gallery.secretFailed", { code }));
+      props.onNotify("warning", () => t("gallery.bridgeUnavailable"), () => t("gallery.bridgeCode", { code }));
     } finally {
       secretSubmitting.set(false);
     }
@@ -109,12 +116,12 @@ export function GalleryScreen(props: GalleryScreenProps) {
 
   const handleOpenAllowedLink = async (href: string) => {
     const opened = await openAllowedExternalUrl(href, allowlist);
-    linkStatus.set(opened ? `Opened ${href}` : `Blocked ${href}`);
+    linkStatus.set(() => t(opened ? "gallery.linkOpened" : "gallery.linkBlocked", { href }));
   };
 
   const handleOpenBlockedLink = async (href: string) => {
     const opened = await openAllowedExternalUrl(href);
-    linkStatus.set(opened ? `Opened ${href}` : `Blocked ${href}`);
+    linkStatus.set(() => t(opened ? "gallery.linkOpened" : "gallery.linkBlocked", { href }));
   };
 
   return (
@@ -122,51 +129,51 @@ export function GalleryScreen(props: GalleryScreenProps) {
       {/* Actions & Semantic Status */}
       <Card>
         <CardHeader>
-          <CardTitle>Actions &amp; Status Tokens</CardTitle>
+          <CardTitle>{t("gallery.actions")}</CardTitle>
           <CardDescription>
-            Desktop-scaled buttons, icon actions, semantic pills, and Host lifecycle previews.
+            {t("gallery.actionsDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <View class="flex-row flex-wrap items-center gap-2">
-            <Button variant="primary" size="md" onPress={() => props.onNotify("info", "Primary action")}>
-              Primary
+            <Button variant="primary" size="md" onPress={() => props.onNotify("info", () => t("gallery.primaryAction"))}>
+              {t("gallery.primary")}
             </Button>
-            <Button variant="secondary" size="md">Secondary</Button>
-            <Button variant="outline" size="md">Outline</Button>
-            <Button variant="ghost" size="md">Ghost</Button>
-            <Button variant="danger" size="md">Danger</Button>
+            <Button variant="secondary" size="md">{t("gallery.secondary")}</Button>
+            <Button variant="outline" size="md">{t("gallery.outline")}</Button>
+            <Button variant="ghost" size="md">{t("gallery.ghost")}</Button>
+            <Button variant="danger" size="md">{t("gallery.danger")}</Button>
             <Button variant="primary" size="sm" loading>
-              Loading
+              {t("gallery.loading")}
             </Button>
             <Button variant="outline" size="sm" disabled>
-              Disabled
+              {t("gallery.disabled")}
             </Button>
             <IconButton
               icon="refresh"
               variant="outline"
               size="md"
-              accessibilityLabel="Refresh preview"
-              onPress={() => props.onNotify("info", "Preview refreshed")}
+              accessibilityLabel={t("gallery.refresh")}
+              onPress={() => props.onNotify("info", () => t("gallery.refreshed"))}
             />
           </View>
           <Separator />
           <View class="flex-row flex-wrap items-center gap-2">
-            <Badge variant="neutral" label="Neutral" />
-            <Badge variant="primary" label="Primary" />
-            <Badge variant="success" symbol="✓" label="Success" />
-            <Badge variant="warning" symbol="!" label="Warning" />
-            <Badge variant="danger" symbol="×" label="Danger" />
+            <Badge variant="neutral" label={t("gallery.neutral")} />
+            <Badge variant="primary" label={t("gallery.primary")} />
+            <Badge variant="success" symbol="✓" label={t("gallery.success")} />
+            <Badge variant="warning" symbol="!" label={t("gallery.warning")} />
+            <Badge variant="danger" symbol="×" label={t("gallery.danger")} />
           </View>
           <View class="flex-row flex-wrap items-center gap-2">
-            <Text class="text-xs font-medium text-muted-foreground">Host State Preview:</Text>
+            <Text class="text-xs font-medium text-muted-foreground">{t("gallery.hostPreview")}</Text>
             <Button
               testID="host-preview-starting"
               size="sm"
               variant="ghost"
               onPress={() => setPreviewHostState({ state: "starting", pid: 4100 })}
             >
-              Starting
+              {t("host.starting")}
             </Button>
             <Button
               testID="host-preview-running"
@@ -174,7 +181,7 @@ export function GalleryScreen(props: GalleryScreenProps) {
               variant="ghost"
               onPress={() => setPreviewHostState({ state: "running", pid: 4100, activeWork: 2 })}
             >
-              Running
+              {t("host.running")}
             </Button>
             <Button
               testID="host-preview-restarting"
@@ -182,7 +189,7 @@ export function GalleryScreen(props: GalleryScreenProps) {
               variant="ghost"
               onPress={() => setPreviewHostState({ state: "restarting", inMs: 2500, reason: "crash" })}
             >
-              Restarting
+              {t("host.restarting")}
             </Button>
             <Button
               testID="host-preview-stopped"
@@ -197,7 +204,7 @@ export function GalleryScreen(props: GalleryScreenProps) {
                 })
               }
             >
-              Stopped
+              {t("host.stopped")}
             </Button>
             <Button
               testID="host-preview-failed"
@@ -205,7 +212,7 @@ export function GalleryScreen(props: GalleryScreenProps) {
               variant="ghost"
               onPress={() => setPreviewHostState({ state: "failed", reason: "exit 1" })}
             >
-              Failed
+              {t("host.failed")}
             </Button>
           </View>
         </CardContent>
@@ -214,41 +221,41 @@ export function GalleryScreen(props: GalleryScreenProps) {
       {/* Inputs & Option A Secret Boundary */}
       <Card>
         <CardHeader>
-          <CardTitle>Inputs &amp; Credential Boundary (Option A)</CardTitle>
+          <CardTitle>{t("gallery.inputs")}</CardTitle>
           <CardDescription>
-            Centralized Windows CJK font token on standard inputs and pre-bridge signal clearing on masked secrets.
+            {t("gallery.inputsDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Field
-            label="Workspace Label (CJK & Latin)"
-            description="Uses font-cjk on Windows automatically inside src/ui/Input.tsx."
+            label={t("gallery.workspaceLabel")}
+            description={t("gallery.workspaceFont")}
           >
             <Input
               testID="text-input"
               value={standardInput()}
-              placeholder="Type label or 中文..."
-              accessibilityLabel="Workspace label"
+              placeholder={t("gallery.workspacePlaceholder")}
+              accessibilityLabel={t("gallery.workspaceName")}
               onChange={(e) => standardInput.set(e.value)}
             />
           </Field>
-          <Field label="Validation Example" error="Workspace name cannot contain path separators.">
-            <Input value="bad/path" invalid accessibilityLabel="Invalid example" />
+          <Field label={t("gallery.validation")} error={t("gallery.validationError")}>
+            <Input value="bad/path" invalid accessibilityLabel={t("gallery.invalidExample")} />
           </Field>
-          <Field label="Prompt Notes">
+          <Field label={t("gallery.notesLabel")}>
             <Textarea
               testID="text-area"
               value={notesInput()}
-              placeholder="Multiline prompt or 中文笔记..."
-              accessibilityLabel="Prompt notes"
+              placeholder={t("gallery.notesPlaceholder")}
+              accessibilityLabel={t("gallery.notesName")}
               onChange={(e) => notesInput.set(e.value)}
             />
           </Field>
           <Separator />
           <Field
-            label="Provider API Key (Masked)"
+            label={t("gallery.secretLabel")}
             required
-            description="Clears QuickJS signal synchronously before invoking ByokShell.call('keys.submit')."
+            description={t("gallery.secretDescription")}
           >
             <View class="flex-row items-center gap-2">
               <View class="flex-1">
@@ -257,7 +264,7 @@ export function GalleryScreen(props: GalleryScreenProps) {
                   variant="masked"
                   value={secretValue()}
                   placeholder="sk-..."
-                  accessibilityLabel="Provider API key"
+                  accessibilityLabel={t("gallery.secretName")}
                   onChange={(e) => secretValue.set(e.value)}
                   onSubmit={handleSubmitSecret}
                 />
@@ -269,12 +276,12 @@ export function GalleryScreen(props: GalleryScreenProps) {
                 disabled={!secretValue()}
                 onPress={handleSubmitSecret}
               >
-                Submit Key
+                {t("gallery.submitKey")}
               </Button>
             </View>
           </Field>
           <Text testID="secret-status" class="text-xs text-muted-foreground">
-            {`Secret status: ${secretStatus()}`}
+            {t("gallery.secretStatus", { status: secretStatus()() })}
           </Text>
         </CardContent>
       </Card>
@@ -282,9 +289,9 @@ export function GalleryScreen(props: GalleryScreenProps) {
       {/* Selection & Disclosure */}
       <Card>
         <CardHeader>
-          <CardTitle>Selection &amp; Disclosure Controls</CardTitle>
+          <CardTitle>{t("gallery.controls")}</CardTitle>
           <CardDescription>
-            Accessible Switch, Checkbox, Select, Tabs, and Collapsible Disclosure components.
+            {t("gallery.controlsDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -292,20 +299,20 @@ export function GalleryScreen(props: GalleryScreenProps) {
             <Switch
               testID="toggle-autosave"
               checked={autosaveEnabled()}
-              label={autosaveEnabled() ? "Auto-save On" : "Auto-save Off"}
+              label={autosaveEnabled() ? t("gallery.autosaveOn") : t("gallery.autosaveOff")}
               onChange={(checked) => autosaveEnabled.set(checked)}
             />
             <Checkbox
               testID="check-terms"
               checked={termsAccepted()}
-              label={termsAccepted() ? "Audit Confirmed" : "Confirm Audit"}
+              label={termsAccepted() ? t("gallery.auditConfirmed") : t("gallery.auditConfirm")}
               onChange={(checked) => termsAccepted.set(checked)}
             />
             <Checkbox
               testID="check-partial"
               indeterminate={partialSelection()}
               checked={!partialSelection()}
-              label="Partial Selection"
+              label={t("gallery.partialSelection")}
               onChange={() => partialSelection.update((value) => !value)}
             />
           </View>
@@ -315,46 +322,46 @@ export function GalleryScreen(props: GalleryScreenProps) {
                 testID="runtime-select"
                 items={RUNTIME_ITEMS}
                 value={selectedRuntime()}
-                accessibilityLabel="Default runtime"
+                accessibilityLabel={t("gallery.runtime")}
                 onChange={(value) => selectedRuntime.set(value)}
               />
             </View>
-            <Tabs accessibilityLabel="Gallery sections">
+            <Tabs accessibilityLabel={t("gallery.sections")}>
               <Tab
                 testID="tab-overview"
                 selected={activeTab() === "overview"}
                 onPress={() => activeTab.set("overview")}
               >
-                Overview
+                {t("gallery.tab.overview")}
               </Tab>
               <Tab
                 testID="tab-tokens"
                 selected={activeTab() === "tokens"}
                 onPress={() => activeTab.set("tokens")}
               >
-                Tokens
+                {t("gallery.tab.tokens")}
               </Tab>
               <Tab
                 testID="tab-states"
                 selected={activeTab() === "states"}
                 onPress={() => activeTab.set("states")}
               >
-                States
+                {t("gallery.tab.states")}
               </Tab>
             </Tabs>
           </View>
           <Text testID="tab-selection-label" class="text-xs text-muted-foreground">
-            {`Selected tab: ${activeTab()} • Runtime: ${selectedRuntime() ?? "none"}`}
+            {t("gallery.selection", { tab: t(`gallery.tab.${activeTab()}`), runtime: selectedRuntime() ?? t("gallery.none") })}
           </Text>
           <Disclosure
             testID="disclosure-trigger"
             open={disclosureOpen()}
-            title="Architecture Invariants"
-            summary={disclosureOpen() ? "Expanded" : "Collapsed"}
+            title={t("gallery.invariants")}
+            summary={disclosureOpen() ? t("gallery.expanded") : t("gallery.collapsed")}
             onToggle={(nextOpen) => disclosureOpen.set(nextOpen)}
           >
             <Text class="text-xs text-foreground">
-              One bridge type authority in src/bridge/protocol.ts; zero Node or SDK runtime bundled into QuickJS.
+              {t("gallery.invariantsDetail")}
             </Text>
           </Disclosure>
         </CardContent>
@@ -363,28 +370,28 @@ export function GalleryScreen(props: GalleryScreenProps) {
       {/* Surfaces, Lists & Feedback */}
       <Card>
         <CardHeader>
-          <CardTitle>Surfaces, Lists &amp; Feedback</CardTitle>
+          <CardTitle>{t("gallery.surfaces")}</CardTitle>
         </CardHeader>
         <CardContent>
           <ListItem
             testID="list-item-demo"
             title="Writer Bot"
-            description="Ready on Pi Runtime"
+            description={t("gallery.readyOnPi")}
             leading={<Avatar name="Writer Bot" size="sm" />}
-            trailing={<Badge variant="hostRunning" symbol="●" label="Idle" />}
+            trailing={<Badge variant="hostRunning" symbol="●" label={t("conversation.state.idle")} />}
             selected
-            onPress={() => props.onNotify("info", "Selected Writer Bot")}
+            onPress={() => props.onNotify("info", () => t("gallery.selectedWriter"))}
           />
           <View class="flex-row flex-wrap items-center gap-4">
-            <Spinner label="Syncing runtime status" />
+            <Spinner label={t("gallery.syncing")} />
             <View class="w-40 gap-1.5">
               <Skeleton class="w-full" />
               <Skeleton class="w-28" />
             </View>
           </View>
           <Empty
-            title="No active Bot tasks"
-            description="Tasks started from Conversations will stream live telemetry here."
+            title={t("gallery.empty")}
+            description={t("gallery.emptyDescription")}
           />
         </CardContent>
       </Card>
@@ -392,39 +399,39 @@ export function GalleryScreen(props: GalleryScreenProps) {
       {/* Overlays & External Link UI Allowlist */}
       <Card>
         <CardHeader>
-          <CardTitle>Overlays &amp; External Link UI Allowlist</CardTitle>
+          <CardTitle>{t("gallery.overlays")}</CardTitle>
           <CardDescription>
-            Escape-dismissible overlays and UI-layer https + brand.externalOrigins allowlist (enforced under ADR-052 D2 + #2457 D-O3).
+            {t("gallery.overlaysDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <View class="flex-row flex-wrap items-center gap-2">
             <Button testID="open-dialog-btn" variant="outline" onPress={() => dialogOpen.set(true)}>
-              Open Dialog
+              {t("gallery.openDialog")}
             </Button>
             <Button testID="open-sheet-btn" variant="outline" onPress={() => sheetOpen.set(true)}>
-              Open Sheet
+              {t("gallery.openSheet")}
             </Button>
             <Button
               testID="toast-trigger-btn"
               variant="secondary"
-              onPress={() => props.onNotify("info", "Notice banner", "Rendered in bottom-right ToastRegion.")}
+              onPress={() => props.onNotify("info", () => t("gallery.notice"), () => t("gallery.noticeDescription"))}
             >
-              Show Toast
+              {t("gallery.showToast")}
             </Button>
-            <Tooltip text="Keyboard shortcuts & commands">
+            <Tooltip text={t("gallery.shortcuts")}>
               <Popover
                 open={popoverOpen()}
                 onOpenChange={(next) => popoverOpen.set(next)}
                 trigger={
                   <Button testID="open-popover-btn" variant="ghost">
-                    Open Popover
+                    {t("gallery.popover")}
                   </Button>
                 }
               >
                 <View class="gap-1">
-                  <Text class="text-xs font-medium text-popover-foreground">Quick Inspector</Text>
-                  <Text class="text-xs text-muted-foreground">Dismisses on Escape or outside click.</Text>
+                  <Text class="text-xs font-medium text-popover-foreground">{t("gallery.inspector")}</Text>
+                  <Text class="text-xs text-muted-foreground">{t("gallery.inspectorDescription")}</Text>
                 </View>
               </Popover>
             </Tooltip>
@@ -433,19 +440,19 @@ export function GalleryScreen(props: GalleryScreenProps) {
               onOpenChange={(next) => menuOpen.set(next)}
               trigger={
                 <Button testID="open-menu-btn" variant="outline">
-                  Command Menu
+                  {t("gallery.commandMenu")}
                 </Button>
               }
             >
               <MenuItem
-                label="Inspect Logs"
+                label={t("gallery.inspectLogs")}
                 icon="info"
                 checked={menuSelection() === "Logs"}
                 onSelect={() => menuSelection.set("Logs")}
               />
               <MenuSeparator />
               <MenuItem
-                label="Reset Gallery"
+                label={t("gallery.reset")}
                 icon="refresh"
                 destructive
                 onSelect={() => menuSelection.set("Reset")}
@@ -456,7 +463,7 @@ export function GalleryScreen(props: GalleryScreenProps) {
           <View class="flex-row flex-wrap items-center gap-4">
             <LinkText
               testID="link-allowed"
-              label="Allowlisted Docs Link"
+              label={t("gallery.allowedLink")}
               href={allowedUrl}
               onOpen={handleOpenAllowedLink}
             />
@@ -466,16 +473,16 @@ export function GalleryScreen(props: GalleryScreenProps) {
               size="sm"
               onPress={() => handleOpenBlockedLink(BLOCKED_EXTERNAL_URL)}
             >
-              Test Blocked URL
+              {t("gallery.blockedLink")}
             </Button>
             <Text testID="link-status" class="text-xs text-muted-foreground">
-              {`Link status: ${linkStatus()}`}
+              {t("gallery.linkStatus", { status: linkStatus()() })}
             </Text>
           </View>
         </CardContent>
         <CardFooter>
           <Text class="text-xs text-muted-foreground">
-            {`Capabilities: application + https openUrl • Menu: ${menuSelection()}`}
+            {t("gallery.capabilities", { item: t(`gallery.menu.${menuSelection()}`) })}
           </Text>
         </CardFooter>
       </Card>
@@ -483,33 +490,33 @@ export function GalleryScreen(props: GalleryScreenProps) {
       <Dialog
         testID="demo-dialog"
         open={dialogOpen()}
-        title="Foundations Dialog"
-        description="Press Escape or Close to dismiss."
+        title={t("gallery.dialog")}
+        description={t("gallery.dialogDescription")}
         onOpenChange={(open) => dialogOpen.set(open)}
         footer={
           <Button testID="dialog-close-confirm" variant="primary" size="sm" onPress={() => dialogOpen.set(false)}>
-            Done
+            {t("gallery.done")}
           </Button>
         }
       >
         <Text class="text-sm text-foreground">
-          Dialog focus, Escape key dismissal, and backdrop handling run through nsh/base Dialog.
+          {t("gallery.dialogDetail")}
         </Text>
       </Dialog>
 
       <Sheet
         testID="demo-sheet"
         open={sheetOpen()}
-        title="Inspector Drawer"
+        title={t("gallery.sheet")}
         onOpenChange={(open) => sheetOpen.set(open)}
         footer={
           <Button variant="secondary" size="sm" onPress={() => sheetOpen.set(false)}>
-            Close
+            {t("common.close")}
           </Button>
         }
       >
         <Text class="text-sm text-foreground">
-          Edge-anchored inspector panel using semantic popover surface tokens.
+          {t("gallery.sheetDescription")}
         </Text>
       </Sheet>
     </View>

@@ -17,9 +17,15 @@ export const AGENT_EGRESS_POLICY: AgentEgressPolicy = {
 export interface ModelEntry {
   readonly label: string;
 }
-/** A "New by role" preset of the brand config. */
+/** The stable reference in the conversation snapshot. Renderers resolve its copy from the brand. */
 export interface RolePreset {
   readonly id: string;
+}
+
+export type RoleLocale = 'en' | 'zh-Hans' | 'zh-Hant';
+
+/** The label and defaults a renderer uses when starting a new Bot. */
+export interface RolePresetCopy {
   readonly label: string;
   readonly role: string;
   readonly persona: string;

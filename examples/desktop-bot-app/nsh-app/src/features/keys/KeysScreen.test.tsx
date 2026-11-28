@@ -142,13 +142,8 @@ describe("KeysScreen (#2461 Slice 2)", () => {
     });
 
     await busyApp.waitFor("id:keys-list-refusal");
-    expect(
-      busyApp
-        .texts()
-        .some((text) =>
-          text.includes("Cannot list provider keys while an app update or recovery action is running"),
-        ),
-    ).toBe(true);
+    expect(busyApp.shows("text:The operation failed.")).toBe(true);
+    expect(busyApp.texts().join(" ")).not.toContain("Cannot list provider keys while an app update or recovery action is running");
     expect(busyApp.shows("id:keys-models-refusal")).toBe(true);
   });
 
@@ -268,7 +263,7 @@ describe("KeysScreen (#2461 Slice 2)", () => {
     }
   });
 
-  test("editing stored profile preserves keep + enabled, and refusal shows code without resubmitting", async () => {
+  test("editing stored profile preserves keep + enabled, and shows a local refusal without resubmitting", async () => {
     const existing = makeStoredStatus({
       profile_ref: "zai-edit",
       display_name: "Original Name",
@@ -312,9 +307,8 @@ describe("KeysScreen (#2461 Slice 2)", () => {
     expect(req.configuration.display_name).toBe("Renamed GLM");
     expect(req.configuration.enabled).toBe(false);
     expect("secret" in req).toBe(false);
-    expect(
-      app.texts().some((text) => text.includes("Keys catalog refused: profile locked")),
-    ).toBe(true);
+    expect(app.shows("text:The operation failed.")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("Keys catalog refused: profile locked");
 
     // Also verify createBridge + submitModelRoute preserves typed error codes on refusal.
     const refusalBridge = createBridge(async () => {

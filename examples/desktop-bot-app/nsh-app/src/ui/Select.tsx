@@ -1,3 +1,4 @@
+import { t } from "../i18n.ts";
 import { Text, View } from "nsh";
 import { Select as BaseSelect, type SelectItem } from "nsh/base";
 import { Icon } from "./Icon.tsx";
@@ -30,7 +31,7 @@ export function Select(props: UiSelectProps) {
       items={props.items}
       value={props.value}
       defaultValue={props.defaultValue}
-      placeholder={props.placeholder ?? "Select an option"}
+      placeholder={props.placeholder ?? t("common.select")}
       disabled={Boolean(props.disabled)}
       accessibilityLabel={props.accessibilityLabel}
       onChange={(e) => props.onChange?.(e.value)}
@@ -44,7 +45,7 @@ export function Select(props: UiSelectProps) {
           )}
         >
           <Text class={cx("text-sm", selectedTitle() ? "text-foreground" : "text-tertiary-foreground")}>
-            {selectedTitle() ?? props.placeholder ?? "Select an option"}
+            {selectedTitle() ?? props.placeholder ?? t("common.select")}
           </Text>
           <Icon name="chevronDown" size="sm" class="text-muted-foreground" />
         </View>

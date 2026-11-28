@@ -1,3 +1,4 @@
+import { t } from "../../i18n.ts";
 import type { RuntimeView } from "../../../../src/host/settings/types.ts";
 import type { BadgeVariant } from "../../ui/tokens.ts";
 
@@ -24,20 +25,20 @@ export interface RuntimeStatusMeta {
   readonly label: string;
 }
 
-export const RUNTIME_STATUS_META: Readonly<Record<RuntimeStatusKey, RuntimeStatusMeta>> = {
-  "signed-in": { key: "signed-in", variant: "success", symbol: "✓", label: "signed in" },
-  "signed-out": { key: "signed-out", variant: "warning", symbol: "○", label: "signed out" },
-  "not-checked": { key: "not-checked", variant: "neutral", symbol: "?", label: "not checked" },
-  "check-timed-out": { key: "check-timed-out", variant: "warning", symbol: "◷", label: "check timed out" },
-  "untested-version": { key: "untested-version", variant: "warning", symbol: "!", label: "untested version" },
-  "version-blocked": { key: "version-blocked", variant: "danger", symbol: "✕", label: "version blocked" },
-  "not-installed": { key: "not-installed", variant: "neutral", symbol: "–", label: "not installed" },
-  "cant-run": { key: "cant-run", variant: "danger", symbol: "✕", label: "can't run" },
+const RUNTIME_STATUS_META: Readonly<Record<RuntimeStatusKey, Omit<RuntimeStatusMeta, "label">>> = {
+  "signed-in": { key: "signed-in", variant: "success", symbol: "✓" },
+  "signed-out": { key: "signed-out", variant: "warning", symbol: "○" },
+  "not-checked": { key: "not-checked", variant: "neutral", symbol: "?" },
+  "check-timed-out": { key: "check-timed-out", variant: "warning", symbol: "◷" },
+  "untested-version": { key: "untested-version", variant: "warning", symbol: "!" },
+  "version-blocked": { key: "version-blocked", variant: "danger", symbol: "✕" },
+  "not-installed": { key: "not-installed", variant: "neutral", symbol: "–" },
+  "cant-run": { key: "cant-run", variant: "danger", symbol: "✕" },
   "rejected-during-turn": {
     key: "rejected-during-turn",
     variant: "danger",
     symbol: "!",
-    label: "rejected during a turn",
+
   },
 };
 
@@ -48,7 +49,7 @@ export interface RuntimeStatusOptions {
 
 /** Returns the presentation metadata for an explicit status key (for example failure cards). */
 export function runtimeStatusMeta(key: RuntimeStatusKey): RuntimeStatusMeta {
-  return RUNTIME_STATUS_META[key];
+  return { ...RUNTIME_STATUS_META[key], label: t(`runtime.${key}`) };
 }
 
 /**
@@ -60,15 +61,15 @@ export function runtimeStatus(
   runtime: Pick<RuntimeView, "outcome" | "verdict" | "authPresent">,
   options?: RuntimeStatusOptions,
 ): RuntimeStatusMeta {
-  if (runtime.outcome === "not-found") return RUNTIME_STATUS_META["not-installed"];
-  if (runtime.outcome === "timeout") return RUNTIME_STATUS_META["check-timed-out"];
-  if (runtime.outcome !== "available") return RUNTIME_STATUS_META["cant-run"];
-  if (runtime.verdict === "block") return RUNTIME_STATUS_META["version-blocked"];
-  if (options?.rejectedDuringTurn === true) return RUNTIME_STATUS_META["rejected-during-turn"];
-  if (runtime.authPresent === false) return RUNTIME_STATUS_META["signed-out"];
-  if (runtime.verdict === "warn") return RUNTIME_STATUS_META["untested-version"];
-  if (runtime.authPresent === true) return RUNTIME_STATUS_META["signed-in"];
-  return RUNTIME_STATUS_META["not-checked"];
+  if (runtime.outcome === "not-found") return runtimeStatusMeta("not-installed");
+  if (runtime.outcome === "timeout") return runtimeStatusMeta("check-timed-out");
+  if (runtime.outcome !== "available") return runtimeStatusMeta("cant-run");
+  if (runtime.verdict === "block") return runtimeStatusMeta("version-blocked");
+  if (options?.rejectedDuringTurn === true) return runtimeStatusMeta("rejected-during-turn");
+  if (runtime.authPresent === false) return runtimeStatusMeta("signed-out");
+  if (runtime.verdict === "warn") return runtimeStatusMeta("untested-version");
+  if (runtime.authPresent === true) return runtimeStatusMeta("signed-in");
+  return runtimeStatusMeta("not-checked");
 }
 
 export type RuntimeSignInGuidance =
@@ -81,22 +82,20 @@ const SIGN_IN_COMMANDS: Readonly<Record<string, string>> = {
   codex: "codex login",
 };
 
-export const UNKNOWN_SIGN_IN_NOTE = "Sign in with the CLI's own command";
-
 /** Per-runtime sign-in guidance. Only Claude Code and Codex expose known terminal login commands. */
 export function runtimeSignInGuidance(runtimeId: string): RuntimeSignInGuidance {
   if (runtimeId === "pi") {
-    return { kind: "byok", note: "Configure provider keys in the Keys section." };
+    return { kind: "byok", note: t("runtime.signInKeys") };
   }
   const command = SIGN_IN_COMMANDS[runtimeId];
   if (command !== undefined) {
     return {
       kind: "command",
       command,
-      note: "Run this command in a terminal, then press Check again.",
+      note: t("runtime.signInCommand"),
     };
   }
-  return { kind: "cli-unknown", note: UNKNOWN_SIGN_IN_NOTE };
+  return { kind: "cli-unknown", note: t("runtime.signInUnknown") };
 }
 
 const RUNTIME_DISPLAY_NAMES: Readonly<Record<string, string>> = {
@@ -112,4 +111,20 @@ const RUNTIME_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 /** Human-readable display label for known runtime ids, falling back to the raw id. */
 export function runtimeDisplayName(runtimeId: string): string {
   return RUNTIME_DISPLAY_NAMES[runtimeId] ?? runtimeId;
+}
+
+const REFUSAL_KEYS: Readonly<Record<string, string>> = {
+  app_server_unavailable: "runtime.refusal.app_server_unavailable",
+  acp_unavailable: "runtime.refusal.acp_unavailable",
+  platform_unsupported: "runtime.refusal.platform_unsupported",
+  runtime_environment_unavailable: "runtime.refusal.runtime_environment_unavailable",
+  agent_user_context_unavailable: "runtime.refusal.agent_user_context_unavailable",
+};
+
+export function runtimeOutcomeText(runtime: Pick<RuntimeView, "outcome" | "reason">): string {
+  const reason = runtime.reason;
+  if (runtime.outcome === "refused" && reason !== undefined && Object.hasOwn(REFUSAL_KEYS, reason)) {
+    return t(REFUSAL_KEYS[reason]!);
+  }
+  return t(`runtime.outcome.${runtime.outcome}`);
 }

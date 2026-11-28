@@ -1,8 +1,10 @@
+import { rolePreset } from "../../../../brand.config.ts";
+import { appLocale, t } from "../../i18n.ts";
 import { batch, cleanup, computed, resource, signal, Text, View } from "nsh";
 import type { ModelChoice } from "../../../../src/host/conversation/catalog.ts";
 import type { RuntimeView } from "../../../../src/host/settings/types.ts";
 import type { BotProfile } from "../../../../src/host/store/types.ts";
-import { toBridgeCallError } from "../../bridge.ts";
+import { bridgeErrorText } from "../../statusCopy.ts";
 import {
   dismissOnboarding,
   hostReady,
@@ -29,7 +31,7 @@ import {
 } from "../../ui/index.ts";
 import { choiceAvailability } from "../conversation/availability.ts";
 import { createCommand } from "../conversation/command.ts";
-import { runtimeSignInGuidance, runtimeStatus, type RuntimeStatusMeta } from "../settings/runtimeStatus.ts";
+import { runtimeOutcomeText, runtimeSignInGuidance, runtimeStatus, type RuntimeStatusMeta } from "../settings/runtimeStatus.ts";
 
 export interface OnboardingCliEntry {
   readonly choice: ModelChoice;
@@ -40,7 +42,7 @@ export interface OnboardingCliEntry {
 
 /**
  * Projects detected non-Pi CLI models in `#2546` catalog order for first-run onboarding:
- * - omits Pi (offered via the dedicated "Pi with your own key" action) and key-profile entries
+ * - omits Pi (offered via the dedicated t("onboarding.piWithKey") action) and key-profile entries
  * - omits not-installed and unreported runtimes
  * - disables signed-out, version-blocked, check-timed-out, and can't-run entries
  */
@@ -73,23 +75,23 @@ function signInCommandFor(runtimeId: string): string | undefined {
 function statusDetailText(entry: OnboardingCliEntry): string | null {
   const { runtime, status } = entry;
   if (status.key === "version-blocked") {
-    return "Blocked by the Host version policy.";
+    return t("runtime.blocked");
   }
   if (status.key === "check-timed-out") {
-    return "Check timed out before sign-in could be verified. Press Check again to retry.";
+    return t("runtime.signInTimedOut");
   }
   if (status.key === "cant-run") {
-    return runtime.reason === undefined ? runtime.outcome : `${runtime.outcome}: ${runtime.reason}`;
+    return runtimeOutcomeText(runtime);
   }
   if (status.key === "untested-version" && runtime.qualifiedVersion !== undefined) {
-    return `Untested version — qualified against ${runtime.qualifiedVersion}`;
+    return t("runtime.qualified", { version: runtime.qualifiedVersion });
   }
   return null;
 }
 
 /**
  * First-run agent picker: reads detected local CLIs from `settings.device`, lets the user continue
- * with a ready CLI (creating their first Bot via `k8.saveBot`) or choose "Pi with your own key"
+ * with a ready CLI (creating their first Bot via `k8.saveBot`) or choose t("onboarding.piWithKey")
  * to configure a BYOK provider profile in Keys.
  */
 export function OnboardingScreen() {
@@ -103,7 +105,7 @@ export function OnboardingScreen() {
   });
 
   const deviceReads = signal(0);
-  // Consumed once by the read that "Check again" triggers, so a Host restart while mounted gets the default read.
+  // Consumed once by the read that t("common.checkAgain") triggers, so a Host restart while mounted gets the default read.
   let pendingCheckAuth = false;
   const activeCheckAuth = signal(false);
   const device = resource(
@@ -118,7 +120,7 @@ export function OnboardingScreen() {
   const checkingAuth = computed(() => device.loading() && activeCheckAuth());
   const deviceFailure = () => {
     const error = device.error();
-    return error === undefined ? null : toBridgeCallError(error).message;
+    return error === undefined ? null : bridgeErrorText(error);
   };
   const checkAgain = () => {
     if (!hostReady() || device.loading()) {
@@ -137,7 +139,7 @@ export function OnboardingScreen() {
     return buildOnboardingCliEntries(models, currentDevice.runtimes);
   });
 
-  // Auto-selects the first selectable CLI on load and re-aligns after "Check again" if the chosen one became unavailable.
+  // Auto-selects the first selectable CLI on load and re-aligns after t("common.checkAgain") if the chosen one became unavailable.
   const selectedEntry = computed<OnboardingCliEntry | undefined>(() => {
     const entries = cliEntries();
     const preferred = preferredModelId();
@@ -157,12 +159,13 @@ export function OnboardingScreen() {
     if (selected === undefined || device.loading() || saveCommand.busy()) {
       return;
     }
-    const preset = k8View()?.roles[0];
+    const roleId = k8View()?.roles[0]?.id;
+    const preset = roleId === undefined ? undefined : rolePreset(roleId, appLocale());
     const profile: BotProfile = {
       id: botId,
       name: preset?.label ?? selected.choice.label,
-      role: preset?.role ?? "Assistant",
-      persona: preset?.persona ?? "Helpful desktop assistant.",
+      role: preset?.role ?? t("onboarding.fallbackRole"),
+      persona: preset?.persona ?? t("onboarding.fallbackPersona"),
       model: selected.choice.id,
     };
     if (await saveCommand.run(() => saveBot(profile))) {
@@ -192,9 +195,9 @@ export function OnboardingScreen() {
         <CardHeader>
           <View class="flex-row items-center gap-3">
             <View class="flex-1 min-w-0 gap-1">
-              <CardTitle>Choose an agent to get started</CardTitle>
+              <CardTitle>{t("onboarding.title")}</CardTitle>
               <CardDescription>
-                Pick a detected CLI agent to create your first Bot, or configure Pi with your own API key.
+                {t("onboarding.description")}
               </CardDescription>
             </View>
             <Button
@@ -205,7 +208,7 @@ export function OnboardingScreen() {
               disabled={!hostReady() || device.loading() || saveCommand.busy()}
               onPress={checkAgain}
             >
-              Check again
+              {t("common.checkAgain")}
             </Button>
           </View>
         </CardHeader>
@@ -213,14 +216,14 @@ export function OnboardingScreen() {
         <CardContent>
           <If when={device() === undefined && deviceFailure() === null}>
             <View testID="onboarding-loading" class="py-4">
-              <Spinner label="Checking installed agents…" />
+              <Spinner label={t("onboarding.checking")} />
             </View>
           </If>
 
           <If when={deviceFailure()}>
             {(message) => (
               <View role="alert" testID="onboarding-device-error">
-                <Text class="text-xs text-destructive">{`Could not check local agents: ${message()}`}</Text>
+                <Text class="text-xs text-destructive">{t("onboarding.checkError", { error: message() })}</Text>
               </View>
             )}
           </If>
@@ -228,7 +231,7 @@ export function OnboardingScreen() {
           <If when={device() !== undefined}>
             <View class="gap-3">
               <If when={cliEntries().length > 0}>
-                <View role="list" accessibilityLabel="Detected CLI agents" testID="onboarding-cli-list" class="gap-1">
+                <View role="list" accessibilityLabel={t("onboarding.detected")} testID="onboarding-cli-list" class="gap-1">
                   <Each of={cliEntries()} key={(entry) => entry.choice.id}>
                     {(entry, index) => (
                       <View testID={`onboarding-cli-row-${entry().choice.id}`} class="gap-2">
@@ -308,8 +311,8 @@ export function OnboardingScreen() {
                 <Surface tone="muted" testID="onboarding-no-selectable" class="px-3 py-2.5">
                   <Text class="text-xs text-muted-foreground">
                     {cliEntries().length === 0
-                      ? "No installed CLI agents were found. Install and sign in to a CLI and press Check again, or choose Pi with your own key below."
-                      : "No detected CLI is ready to use yet. Sign in and press Check again, or choose Pi with your own key below."}
+                      ? t("onboarding.noneInstalled")
+                      : t("onboarding.noneReady")}
                   </Text>
                 </Surface>
               </If>
@@ -332,16 +335,16 @@ export function OnboardingScreen() {
             disabled={!hostReady() || device.loading() || saveCommand.busy() || selectedEntry() === undefined}
             onPress={() => void handleContinue()}
           >
-            Continue
+            {t("onboarding.continue")}
           </Button>
         </CardFooter>
       </Card>
 
       <Card testID="onboarding-pi-card">
         <CardHeader>
-          <CardTitle>Pi with your own key</CardTitle>
+          <CardTitle>{t("onboarding.piWithKey")}</CardTitle>
           <CardDescription>
-            Bring an OpenAI, Anthropic, or compatible API key and manage provider profiles in Keys.
+            {t("onboarding.piDescription")}
           </CardDescription>
         </CardHeader>
         <CardFooter>
@@ -351,7 +354,7 @@ export function OnboardingScreen() {
             disabled={saveCommand.busy()}
             onPress={handlePiWithOwnKey}
           >
-            Pi with your own key
+            {t("onboarding.piWithKey")}
           </Button>
         </CardFooter>
       </Card>

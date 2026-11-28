@@ -1,7 +1,9 @@
+import { rolePreset } from "../../../../brand.config.ts";
+import { appLocale, t } from "../../i18n.ts";
 import { cleanup, signal, Text, View } from "nsh";
 import type { RolePreset } from "../../../../src/host/conversation/catalog.ts";
 import type { BotProfile } from "../../../../src/host/store/types.ts";
-import { toBridgeCallError } from "../../bridge.ts";
+import { bridgeErrorText } from "../../statusCopy.ts";
 import { hostReady, k8View, reloadK8View, selectBot, selectedBotId } from "../../store.ts";
 import { Button, Spinner } from "../../ui/index.ts";
 import { BotMemorySummary } from "./BotMemoryPanel.tsx";
@@ -23,7 +25,7 @@ export function ConversationScreen() {
   const snapshot = () => k8View();
   const failure = () => {
     const error = k8View.error();
-    return error === undefined ? null : toBridgeCallError(error).message;
+    return error === undefined ? null : bridgeErrorText(error);
   };
   const editingEntries = () => {
     const entry = editing();
@@ -36,18 +38,20 @@ export function ConversationScreen() {
     return current !== undefined && current.botId === selectedBotId() ? current : undefined;
   };
   // The editor picks the first selectable model once it has read the runtimes' availability.
-  const startNew = (role: RolePreset) =>
+  const startNew = ({ id }: RolePreset) => {
+    const { label, role, persona } = rolePreset(id, appLocale());
     editing.set({
       creating: true,
-      profile: { id: crypto.randomUUID(), name: role.label, role: role.role, persona: role.persona, model: "" },
+      profile: { id: crypto.randomUUID(), name: label, role, persona, model: "" },
     });
+  };
   return (
     <View testID="conversation-section" class="gap-4">
       <If when={failure()}>
         <View role="alert" testID="conv-view-error" class="flex-row items-center gap-3">
-          <Text class="text-sm text-destructive flex-1">{`Conversations unavailable: ${failure()}`}</Text>
+          <Text class="text-sm text-destructive flex-1">{t("conversation.unavailable", { error: failure() ?? "" })}</Text>
           <Button testID="conv-view-retry" variant="outline" size="sm" onPress={reloadK8View}>
-            Retry
+            {t("common.retry")}
           </Button>
         </View>
       </If>
@@ -58,7 +62,7 @@ export function ConversationScreen() {
             <View class="flex-row items-center gap-2" accessibilityState={{ busy: true }}>
               <Spinner />
               <Text class="text-sm text-muted-foreground">
-                {hostReady() ? "Loading conversations…" : "Conversations load once the Host runs."}
+                {hostReady() ? t("conversation.loading") : t("conversation.offline")}
               </Text>
             </View>
           </If>
@@ -100,7 +104,7 @@ export function ConversationScreen() {
                   when={bot()}
                   else={
                     <Text class="text-sm text-muted-foreground">
-                      {loaded().bots.length === 0 ? 'No Bots yet. Create one with "New by role".' : "Select a Bot."}
+                      {loaded().bots.length === 0 ? t("conversation.empty") : t("conversation.select")}
                     </Text>
                   }
                 >
@@ -129,14 +133,14 @@ export function ConversationScreen() {
                               })
                             }
                           >
-                            Edit profile
+                            {t("conversation.edit")}
                           </Button>
                         </If>
                       </View>
                       <BotMemorySummary botId={selected().id} />
                       <If when={selected().archived}>
                         <Text class="text-xs text-muted-foreground">
-                          This Bot is archived. Archiving is permanent; its conversation stays readable.
+                          {t("conversation.archivedHint")}
                         </Text>
                       </If>
                       <If
@@ -144,7 +148,7 @@ export function ConversationScreen() {
                         else={
                           <View class="flex-row items-center gap-2" accessibilityState={{ busy: true }}>
                             <Spinner />
-                            <Text class="text-sm text-muted-foreground">Loading conversation…</Text>
+                            <Text class="text-sm text-muted-foreground">{t("conversation.loadingBot")}</Text>
                           </View>
                         }
                       >

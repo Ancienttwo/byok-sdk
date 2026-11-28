@@ -1,3 +1,5 @@
+import { formatNumber, t } from "../../i18n.ts";
+import { failureText } from "../../statusCopy.ts";
 import { List, signal, Text, View } from "nsh";
 import type { ConversationItem, TurnEnd } from "../../../../src/host/conversation/view.ts";
 import { answerQuestion, historyUnfolded, setHistoryUnfolded } from "../../store.ts";
@@ -6,11 +8,13 @@ import { createCommand } from "./command.ts";
 
 type Item<K extends ConversationItem["kind"]> = Extract<ConversationItem, { kind: K }>;
 
-const CONCLUSION_LABEL: Readonly<Record<string, string>> = {
-  failed: "Turn failed",
-  cancelled: "Turn cancelled",
-  expired: "Turn expired",
-  no_reply: "Turn ended without a reply",
+const CONCLUSION_LABELS: Readonly<Record<string, string>> = {
+  failed: "conversation.end.failed",
+  cancelled: "conversation.end.cancelled",
+  expired: "conversation.end.expired",
+  declined: "conversation.end.declined",
+  superseded: "conversation.end.superseded",
+  no_reply: "conversation.end.no_reply",
 };
 
 /** A row the latest clear folds away; `clear`, `working` and `question` rows never fold. */
@@ -18,9 +22,9 @@ const isFolded = (item: ConversationItem) => "folded" in item && item.folded;
 
 function endLabel(end: TurnEnd): string {
   if (end.backgroundUnavailable) {
-    return "Turn failed: background Pi work is not available in this app";
+    return t("conversation.backgroundUnavailable");
   }
-  return CONCLUSION_LABEL[end.conclusion] ?? `Turn ended: ${end.conclusion}`;
+  return t(Object.hasOwn(CONCLUSION_LABELS, end.conclusion) ? CONCLUSION_LABELS[end.conclusion]! : "conversation.end.other");
 }
 
 function InputRow(props: { item: () => Item<"input"> }) {
@@ -50,7 +54,7 @@ function ClearRow() {
     <View class="gap-1 py-1">
       <Separator />
       <Text class="text-xs text-muted-foreground text-center">
-        Context cleared: the Bot no longer sees the messages above
+        {t("conversation.cleared")}
       </Text>
     </View>
   );
@@ -58,10 +62,16 @@ function ClearRow() {
 
 function WorkingRow(props: { item: () => Item<"working"> }) {
   const draft = () => props.item().draft;
+  const waitingText = () => {
+    const reason = props.item().blocked;
+    if (reason === undefined) return t("conversation.working");
+    const detail = failureText(reason);
+    return detail === undefined ? t("conversation.waiting") : t("conversation.waitingDetail", { reason: detail });
+  };
   return (
     <View class="items-start gap-1" accessibilityState={{ busy: true }}>
       <Text class="text-xs text-muted-foreground">
-        {props.item().blocked === undefined ? "Working…" : `Waiting: ${props.item().blocked}`}
+        {waitingText()}
       </Text>
       <If when={draft()}>
         {(current) => (
@@ -76,26 +86,30 @@ function WorkingRow(props: { item: () => Item<"working"> }) {
         )}
       </If>
       <If when={draft()?.state === "gap"}>
-        <Text class="text-xs text-muted-foreground">Part of the draft was lost; the accepted reply will be complete.</Text>
+        <Text class="text-xs text-muted-foreground">{t("conversation.draftGap")}</Text>
       </If>
       <If when={draft()?.state === "overflow"}>
-        <Text class="text-xs text-muted-foreground">The draft is too long to show; the accepted reply will follow.</Text>
+        <Text class="text-xs text-muted-foreground">{t("conversation.draftOverflow")}</Text>
       </If>
       <If when={draft()?.state === "failed"}>
-        <Text class="text-xs text-destructive">{`Draft unavailable${draft()?.error === undefined ? "" : `: ${draft()?.error}`}`}</Text>
+        <Text class="text-xs text-destructive">{t("conversation.draftFailed")}</Text>
       </If>
     </View>
   );
 }
 
 function EndedRow(props: { item: () => Item<"ended"> }) {
+  const detail = () => failureText(props.item().end.reason);
   return (
     <Surface tone="muted" class="px-3 py-2 gap-1">
       <View accessible accessibilityLiveRegion="polite" accessibilityLabel={endLabel(props.item().end)}>
-        <Text class="text-sm font-semibold text-foreground">{endLabel(props.item().end)}</Text>
+        <View class="flex-row gap-2">
+          <Text class="text-sm text-foreground">{props.item().end.conclusion === "failed" ? "✕" : "○"}</Text>
+          <Text class="text-sm font-semibold text-foreground flex-1">{endLabel(props.item().end)}</Text>
+        </View>
       </View>
-      <If when={props.item().end.reason !== undefined}>
-        <Text class="text-xs text-muted-foreground">{props.item().end.reason}</Text>
+      <If when={detail()}>
+        <Text class="text-xs text-muted-foreground">{detail()}</Text>
       </If>
     </Surface>
   );
@@ -115,7 +129,7 @@ function QuestionRow(props: { item: () => Item<"question"> }) {
       <Text class="text-sm text-foreground">{question().question}</Text>
       <If
         when={props.item().answer === undefined}
-        else={<Text class="text-xs text-muted-foreground">{`Answered: ${props.item().answer}`}</Text>}
+        else={<Text class="text-xs text-muted-foreground">{t("conversation.answered", { answer: props.item().answer ?? "" })}</Text>}
       >
         <If
           when={question().answerKind === "single_choice"}
@@ -124,7 +138,7 @@ function QuestionRow(props: { item: () => Item<"question"> }) {
               <View class="flex-1">
                 <Input
                   testID={`conv-answer-${props.item().id}`}
-                  accessibilityLabel={`Answer: ${question().question}`}
+                  accessibilityLabel={t("conversation.answerLabel", { question: question().question })}
                   value={answer()}
                   onChange={(e) => answer.set(e.value)}
                   onSubmit={() => {
@@ -140,7 +154,7 @@ function QuestionRow(props: { item: () => Item<"question"> }) {
                 disabled={answer() === ""}
                 onPress={() => submit(answer())}
               >
-                Answer
+                {t("conversation.answer")}
               </Button>
             </View>
           }
@@ -200,16 +214,16 @@ export function Transcript(props: { botId: string; items: readonly ConversationI
           testID="conv-fold-toggle"
           variant="ghost"
           size="sm"
-          accessibilityHint={unfolded() ? "Hides the messages above the latest clear" : "Shows the messages above the latest clear"}
+          accessibilityHint={unfolded() ? t("conversation.hideEarlierHint") : t("conversation.showEarlierHint")}
           onPress={() => setHistoryUnfolded(props.botId, !unfolded())}
         >
-          {`${unfolded() ? "Hide" : "Show"} ${folded()} earlier messages`}
+          {t(unfolded() ? "conversation.hideEarlier" : "conversation.showEarlier", { count: formatNumber(folded()) })}
         </Button>
       </If>
       <List
         testID="conv-transcript"
         role="list"
-        accessibilityLabel="Conversation"
+        accessibilityLabel={t("section.conversation")}
         class="h-96"
         contentClass="gap-3 p-1"
         each={visible()}
@@ -218,7 +232,7 @@ export function Transcript(props: { botId: string; items: readonly ConversationI
         alignment="bottom"
         initialScrollAtEnd
         maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 48 }}
-        empty={<Text class="text-sm text-muted-foreground">No messages yet.</Text>}
+        empty={<Text class="text-sm text-muted-foreground">{t("conversation.noMessages")}</Text>}
       >
         {(item) => (
           // A List cell outlives its item: scrolling recycles it for another key, and the Host keeps `t<turnId>` when a

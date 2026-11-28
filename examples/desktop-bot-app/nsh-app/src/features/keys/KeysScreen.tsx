@@ -1,3 +1,5 @@
+import { t } from "../../i18n.ts";
+import { errorText } from "../../statusCopy.ts";
 import type { ProviderStatus } from "@byok-sdk/keys";
 import {
   applyModelRouteChange,
@@ -7,7 +9,7 @@ import {
   type ModelRouteChange,
   type ModelRouteContext,
   type ModelRouteDraft,
-  type ModelRouteErrorCode,
+
   type ModelRouteFieldError,
   type ModelRouteFieldView,
   type ModelRouteModelChoice,
@@ -43,38 +45,29 @@ import {
   Select,
   Spinner,
   Textarea,
+  type ToastNotice,
 } from "../../ui/index.ts";
 
-const ERROR_COPY: Readonly<Record<ModelRouteErrorCode, string>> = {
-  required: "Required.",
-  invalid_value: "This value is not valid.",
-  invalid_url:
-    "Use an https URL (http only for localhost) with no user name, password, query or fragment, and no private-network address.",
-  not_a_choice: "Pick one of the listed values.",
-  adapter_auth_mismatch: "This adapter does not accept that auth mode.",
-  vendor_adapter_mismatch: "This provider does not use that adapter.",
-  pi_model_required: "This model needs a Pi model config.",
-  pi_model_invalid: "The Pi model config is not valid.",
-  thinking_level_unsupported: "This model does not support that thinking level.",
-  secret_required: "Enter the API key.",
-  secret_reentry_required:
-    "Enter the API key again: the stored key does not fit the changed endpoint.",
-  secret_invalid: "The API key is not valid.",
+const CHOICE_KEYS: Readonly<Record<string, string>> = {
+  "custom": "keys.choice.custom",
+  "openai_compatible": "keys.choice.openai_compatible",
+  "anthropic": "keys.choice.anthropic",
+  "bearer": "keys.choice.bearer",
+  "x_api_key": "keys.choice.x_api_key",
+  "none": "keys.choice.none",
+  "off": "keys.choice.off",
+  "minimal": "keys.choice.minimal",
+  "low": "keys.choice.low",
+  "medium": "keys.choice.medium",
+  "high": "keys.choice.high",
+  "xhigh": "keys.choice.xhigh",
+  "max": "keys.choice.max",
+  "image-input": "keys.choice.image-input",
 };
 
-const LABELS: Readonly<Record<ModelRouteFieldView["field"], string>> = {
-  profile_ref: "Profile id",
-  display_name: "Name",
-  provider_kind: "Provider",
-  adapter: "Adapter",
-  auth_mode: "Auth mode",
-  base_url: "Base URL",
-  model: "Model",
-  pi_model: "Pi model config (JSON)",
-  thinking_level: "Thinking level",
-  capabilities: "Capabilities",
-  secret: "API key",
-};
+function choiceTitle(choice: { value: string; label?: string | null }): string {
+  return Object.hasOwn(CHOICE_KEYS, choice.value) ? t(CHOICE_KEYS[choice.value]!) : choice.label ?? choice.value;
+}
 
 const CLEAR_CHOICE_VALUE = "__clear__";
 const MANUAL_MODEL_OPTION = "__manual__";
@@ -87,8 +80,8 @@ function formatFieldError(error: ModelRouteFieldError | null): string | null {
   if (error === null) {
     return null;
   }
-  const paths = error.paths?.length ? ` (${error.paths.join(", ")})` : "";
-  return `${ERROR_COPY[error.code]}${paths}`;
+  const message = t(`keys.error.${error.code}`);
+  return error.paths?.length ? t("keys.errorPaths", { error: message, paths: error.paths.join(", ") }) : message;
 }
 
 function formatPiModelInitial(draft: ModelRouteDraft): string {
@@ -109,10 +102,7 @@ function buildContext(stored: ProviderStatus | null): ModelRouteContext {
 }
 
 function RefusalBanner(props: { testID: string; refusal: Refusal }) {
-  const text = () =>
-    props.refusal.code === undefined
-      ? props.refusal.message
-      : `${props.refusal.code}: ${props.refusal.message}`;
+  const text = () => errorText(props.refusal.code);
   return (
     <View
       testID={props.testID}
@@ -122,7 +112,7 @@ function RefusalBanner(props: { testID: string; refusal: Refusal }) {
       class="p-3 rounded-(--radius) border border-destructive bg-card gap-1"
     >
       <View class="flex-row items-center gap-2">
-        <Badge variant="danger" symbol="!" label="Refused" />
+        <Badge variant="danger" symbol="!" label={t("keys.refused")} />
         <Text class="text-xs text-destructive flex-1">{text()}</Text>
       </View>
     </View>
@@ -136,31 +126,31 @@ function ReceiptCard(props: { status: ProviderStatus }) {
       role="region"
       accessibilityLiveRegion="polite"
       accessible
-      accessibilityLabel={`Saved ${props.status.display_name}`}
+      accessibilityLabel={t("keys.saved", { name: props.status.display_name })}
       class="p-3 rounded-(--radius) border border-success bg-card gap-2"
     >
       <View class="flex-row items-center justify-between gap-2">
         <Text class="flex-1 text-sm font-semibold text-foreground">
-          {`Saved ${props.status.display_name}`}
+          {t("keys.saved", { name: props.status.display_name })}
         </Text>
         <Badge
           variant={props.status.secret_configured ? "success" : "neutral"}
           symbol={props.status.secret_configured ? "✓" : "○"}
-          label={props.status.secret_configured ? "Key stored" : "No key"}
+          label={props.status.secret_configured ? t("keys.keyStored") : t("keys.noKey")}
         />
       </View>
       <View class="flex-row flex-wrap gap-x-6 gap-y-1">
         <Text class="text-xs font-mono text-muted-foreground">
-          {`Profile: ${props.status.profile_ref}`}
+          {t("keys.storedProfile", { ref: props.status.profile_ref })}
         </Text>
         <Text class="text-xs text-muted-foreground">
-          {`Provider: ${props.status.provider_kind}`}
+          {t("keys.storedProvider", { provider: props.status.provider_kind })}
         </Text>
         <Text class="text-xs font-mono text-muted-foreground">
-          {`Model: ${props.status.model}`}
+          {t("keys.storedModel", { model: props.status.model })}
         </Text>
         <Text class="text-xs font-mono text-muted-foreground">
-          {`Revision: ${props.status.profile_revision}`}
+          {t("keys.storedRevision", { revision: props.status.profile_revision })}
         </Text>
       </View>
     </View>
@@ -168,7 +158,7 @@ function ReceiptCard(props: { status: ProviderStatus }) {
 }
 
 export interface KeysScreenProps {
-  onNotify?: (tone: "info" | "success" | "warning" | "danger", title: string, description?: string) => void;
+  onNotify?: (tone: "info" | "success" | "warning" | "danger", title: ToastNotice["title"], description?: ToastNotice["description"]) => void;
 }
 
 /**
@@ -196,7 +186,7 @@ export function KeysScreen(props: KeysScreenProps) {
   const visibleFields = () => view().fields.filter((field) => field.visible);
   const formTitle = () => {
     const s = editing();
-    return s === null ? "Add a model provider" : `Edit ${s.display_name}`;
+    return s === null ? t("keys.addProvider") : t("keys.editProvider", { name: s.display_name });
   };
   const replaceableStored = (): ProviderStatus | null => {
     const s = editing();
@@ -254,9 +244,9 @@ export function KeysScreen(props: KeysScreenProps) {
     outcome.set(next);
     if ("receipt" in next) {
       resetFormToStored(null, false);
-      props.onNotify?.("success", `Saved ${next.receipt.display_name}`, "Provider profile updated cleanly.");
+      props.onNotify?.("success", () => t("keys.saved", { name: next.receipt.display_name }), () => t("keys.providerSaved"));
     } else {
-      props.onNotify?.("warning", "Provider update refused", next.refusal.message);
+      props.onNotify?.("warning", () => t("keys.providerRefused"), () => errorText(next.refusal.code));
     }
   };
 
@@ -342,7 +332,7 @@ export function KeysScreen(props: KeysScreenProps) {
             value={draft()[fieldName]}
             disabled={busy()}
             invalid={Boolean(getField()?.error)}
-            accessibilityLabel={LABELS[fieldName]}
+            accessibilityLabel={t(`keys.field.${fieldName}`)}
             onChange={(e) => applyFieldChange({ field: fieldName, value: e.value })}
           />
         );
@@ -354,7 +344,7 @@ export function KeysScreen(props: KeysScreenProps) {
           { value: CLEAR_CHOICE_VALUE, title: "—" },
           ...(getField()?.choices ?? []).map((choice) => ({
             value: choice.value,
-            title: choice.label ?? choice.value,
+            title: choiceTitle(choice),
           })),
         ];
         const selectedValue = () => {
@@ -367,7 +357,7 @@ export function KeysScreen(props: KeysScreenProps) {
             items={items()}
             value={selectedValue()}
             disabled={busy()}
-            accessibilityLabel={LABELS[fieldName]}
+            accessibilityLabel={t(`keys.field.${fieldName}`)}
             onChange={(value) => {
               const next = value === null || value === CLEAR_CHOICE_VALUE ? null : value;
               applyFieldChange({ field: fieldName, value: next } as ModelRouteChange);
@@ -378,7 +368,7 @@ export function KeysScreen(props: KeysScreenProps) {
       case "model": {
         const choices = () => (getField()?.choices ?? []) as readonly ModelRouteModelChoice[];
         const selectItems = () => [
-          { value: MANUAL_MODEL_OPTION, title: "Other model…" },
+          { value: MANUAL_MODEL_OPTION, title: t("keys.otherModel") },
           ...choices().map((choice) => ({
             value: modelChoiceKey(choice.value, choice.api),
             title: `${choice.label ?? choice.value} (${choice.api})`,
@@ -400,7 +390,7 @@ export function KeysScreen(props: KeysScreenProps) {
                 items={selectItems()}
                 value={selectedKey()}
                 disabled={busy()}
-                accessibilityLabel="Catalog model"
+                accessibilityLabel={t("keys.catalogModel")}
                 onChange={(value) => {
                   const chosen = choices().find(
                     (choice) => modelChoiceKey(choice.value, choice.api) === value,
@@ -418,7 +408,7 @@ export function KeysScreen(props: KeysScreenProps) {
               value={draft().model}
               disabled={busy()}
               invalid={Boolean(getField()?.error)}
-              accessibilityLabel={LABELS.model}
+              accessibilityLabel={t("keys.field.model")}
               onChange={(e) => applyFieldChange({ field: "model", value: e.value })}
             />
           </View>
@@ -431,7 +421,7 @@ export function KeysScreen(props: KeysScreenProps) {
             value={piModelText()}
             disabled={busy()}
             invalid={Boolean(getField()?.error)}
-            accessibilityLabel={LABELS.pi_model}
+            accessibilityLabel={t("keys.field.pi_model")}
             placeholder='{"contextWindow": 131072, ...}'
             onChange={(e) => {
               piModelText.set(e.value);
@@ -455,7 +445,7 @@ export function KeysScreen(props: KeysScreenProps) {
                 return (
                   <Checkbox
                     testID={`keys-cap-${capName}`}
-                    label={capName}
+                    label={choiceTitle({ value: capName })}
                     disabled={busy()}
                     checked={draft().capabilities.includes(capName as ProviderModelCapability)}
                     onChange={(checked) => {
@@ -485,7 +475,7 @@ export function KeysScreen(props: KeysScreenProps) {
             disabled={busy()}
             invalid={Boolean(getField()?.error)}
             placeholder="sk-..."
-            accessibilityLabel={LABELS.secret}
+            accessibilityLabel={t("keys.field.secret")}
             onChange={(e) =>
               applyFieldChange({
                 field: "secret",
@@ -506,9 +496,9 @@ export function KeysScreen(props: KeysScreenProps) {
         <CardHeader>
           <View testID="keys-stored-header" class="flex-row items-center justify-between gap-3">
             <View class="flex-1 min-w-0 gap-1">
-              <CardTitle>Stored providers</CardTitle>
+              <CardTitle>{t("keys.stored")}</CardTitle>
               <CardDescription>
-                Secret-free provider statuses read via custody child under Host maintenance lock.
+                {t("keys.storedDescription")}
               </CardDescription>
             </View>
             <View class="flex-row items-center gap-2">
@@ -519,7 +509,7 @@ export function KeysScreen(props: KeysScreenProps) {
                 disabled={busy()}
                 onPress={() => resetFormToStored(null, true)}
               >
-                New provider
+                {t("keys.newProvider")}
               </Button>
               <Button
                 testID="keys-reload-btn"
@@ -528,14 +518,14 @@ export function KeysScreen(props: KeysScreenProps) {
                 loading={busy()}
                 onPress={onReload}
               >
-                Reload
+                {t("keys.reload")}
               </Button>
             </View>
           </View>
         </CardHeader>
         <CardContent>
           <If when={listed() === undefined}>
-            <Spinner label="Loading stored providers…" />
+            <Spinner label={t("keys.loading")} />
           </If>
           <If when={listed()?.refusal}>
             {(refusal) => <RefusalBanner testID="keys-list-refusal" refusal={refusal()} />}
@@ -546,8 +536,8 @@ export function KeysScreen(props: KeysScreenProps) {
                 when={statuses().length > 0}
                 else={
                   <Empty
-                    title="No provider profiles stored"
-                    description="Configure a model provider below to store its profile and API key."
+                    title={t("keys.empty")}
+                    description={t("keys.emptyDescription")}
                   />
                 }
               >
@@ -557,10 +547,10 @@ export function KeysScreen(props: KeysScreenProps) {
                       const isSelected = () => editing()?.profile_ref === status().profile_ref;
                       const keyLabel = () =>
                         status().auth_mode === "none"
-                          ? "no key needed"
+                          ? t("keys.noKeyNeeded")
                           : status().secret_configured
-                            ? "key stored"
-                            : "no key stored";
+                            ? t("keys.keyStoredShort")
+                            : t("keys.noKeyStored");
                       return (
                         <ListItem
                           testID={`keys-stored-${status().profile_ref}`}
@@ -576,7 +566,7 @@ export function KeysScreen(props: KeysScreenProps) {
                                 <Badge
                                   variant="warning"
                                   symbol="!"
-                                  label="Unfinished key change: replace key"
+                                  label={t("keys.pendingKey")}
                                 />
                               </If>
                               <Badge
@@ -602,7 +592,7 @@ export function KeysScreen(props: KeysScreenProps) {
         <CardHeader>
           <CardTitle>{formTitle()}</CardTitle>
           <CardDescription>
-            Validated by @byok-sdk/keys/model-route; writes go exclusively through keys.submit custody.
+            {t("keys.formDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -613,7 +603,7 @@ export function KeysScreen(props: KeysScreenProps) {
               const fieldName = untracked(() => field().field);
               return (
                 <Field
-                  label={LABELS[fieldName]}
+                  label={t(`keys.field.${fieldName}`)}
                   required={field().required}
                   error={formatFieldError(field().error)}
                 >
@@ -625,7 +615,7 @@ export function KeysScreen(props: KeysScreenProps) {
         </CardContent>
         <CardFooter class="justify-between">
           <Text class="text-xs text-muted-foreground">
-            {view().secret_configured ? "Stored secret retained unless replaced." : "New key cleared before bridge call."}
+            {view().secret_configured ? t("keys.secretRetained") : t("keys.secretNew")}
           </Text>
           <Button
             testID="keys-save-btn"
@@ -634,7 +624,7 @@ export function KeysScreen(props: KeysScreenProps) {
             disabled={busy() || startFailed() || !view().valid}
             onPress={submitRoute}
           >
-            Save
+            {t("common.save")}
           </Button>
         </CardFooter>
       </Card>
@@ -644,13 +634,13 @@ export function KeysScreen(props: KeysScreenProps) {
         {(stored) => (
           <Card>
             <CardHeader>
-              <CardTitle>{`Replace the key of ${stored().display_name}`}</CardTitle>
+              <CardTitle>{t("keys.replaceTitle", { name: stored().display_name })}</CardTitle>
               <CardDescription>
-                Replaces only the stored credential via keys.submit (clears signal before bridge call).
+                {t("keys.replaceDescription")}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Field label="New API key" required>
+              <Field label={t("keys.newKey")} required>
                 <View class="flex-row items-center gap-2">
                   <View class="flex-1">
                     <Input
@@ -659,7 +649,7 @@ export function KeysScreen(props: KeysScreenProps) {
                       value={replaceSecret()}
                       disabled={busy()}
                       placeholder="sk-..."
-                      accessibilityLabel="New API key"
+                      accessibilityLabel={t("keys.newKey")}
                       onChange={(e) => replaceSecret.set(e.value)}
                       onSubmit={submitReplace}
                     />
@@ -671,7 +661,7 @@ export function KeysScreen(props: KeysScreenProps) {
                     disabled={busy() || startFailed() || replaceSecret() === ""}
                     onPress={submitReplace}
                   >
-                    Replace key
+                    {t("keys.replace")}
                   </Button>
                 </View>
               </Field>
@@ -693,9 +683,9 @@ export function KeysScreen(props: KeysScreenProps) {
         <CardHeader>
           <View testID="keys-models-header" class="flex-row items-center justify-between gap-3">
             <View class="flex-1 min-w-0 gap-1">
-              <CardTitle>Models Bots can use</CardTitle>
+              <CardTitle>{t("keys.models")}</CardTitle>
               <CardDescription>
-                Live model catalog entries from Host k8.view (loads once the Host runs; refreshes on Host state hints).
+                {t("keys.modelsDescription")}
               </CardDescription>
             </View>
             <Button
@@ -705,13 +695,13 @@ export function KeysScreen(props: KeysScreenProps) {
               loading={k8View.loading()}
               onPress={() => k8View.refetch()}
             >
-              Refresh models
+              {t("keys.refreshModels")}
             </Button>
           </View>
         </CardHeader>
         <CardContent>
           <If when={k8View.loading() && k8View() === undefined}>
-            <Spinner label="Loading Host models…" />
+            <Spinner label={t("keys.modelsLoading")} />
           </If>
           <If when={k8ViewRefusal()}>
             {(refusal) => <RefusalBanner testID="keys-models-refusal" refusal={refusal()} />}
@@ -722,8 +712,8 @@ export function KeysScreen(props: KeysScreenProps) {
                 when={data().models.length > 0}
                 else={
                   <Empty
-                    title="No Bot models advertised"
-                    description="Start the Host and save a provider profile with Pi support to populate Bot choices."
+                    title={t("keys.modelsEmpty")}
+                    description={t("keys.modelsEmptyDescription")}
                   />
                 }
               >
