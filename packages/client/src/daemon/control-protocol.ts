@@ -14,11 +14,16 @@ import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from
 import type { RuntimeEnvironmentReport } from '../runtime/environment.js';
 import type { LocalAgentReleaseIdentity } from '../release-identity.js';
 import type {
+  ControlSkillEntryStatus,
+  ControlSkillRegistryStatus,
+  ControlSkillReloadReceipt,
   McpToolsetConfig,
   McpToolsetRegistryStatus,
   RuntimeExecutableSource,
   RuntimeVersionVerdict,
+  SkillEntryStatus,
   SkillRegistryStatus,
+  SkillReloadReceipt,
   SkillSource,
 } from '../types.js';
 import type { AgentHomeExecutionStatus } from '../agent-home.js';
@@ -292,6 +297,15 @@ export class ControlError extends Error {
 export const MAX_LINE_BYTES = 64 * 1024;
 
 /**
+ * Bound on a single authenticated inbound NDJSON request line's byte length
+ * (1 MiB, matching `control-server.ts`'s `MAX_OUTBOUND_QUEUE_BYTES`). Applied
+ * only after mutual HMAC authentication succeeds (`phase = 'ready'`);
+ * unauthenticated handshake frames and client-side reads remain capped at
+ * {@link MAX_LINE_BYTES} (64 KiB).
+ */
+export const MAX_AUTHENTICATED_REQUEST_LINE_BYTES = 1024 * 1024;
+
+/**
  * Buffers raw socket bytes and yields complete lines. Splits on the raw byte
  * `0x0a` BEFORE any UTF-8 decoding — `0x0A` can only ever appear as an actual newline in
  * valid UTF-8, so this never risks decoding a multi-byte character that
@@ -299,20 +313,51 @@ export const MAX_LINE_BYTES = 64 * 1024;
  */
 export class NdjsonLineReader {
   private pending: Buffer = Buffer.alloc(0);
+  private maxLineBytes: number;
 
-  /** @throws if the still-unterminated remainder exceeds {@link MAX_LINE_BYTES} — see that constant's own doc comment. */
+  constructor(maxLineBytes: number = MAX_LINE_BYTES) {
+    if (!Number.isSafeInteger(maxLineBytes) || maxLineBytes <= 0) {
+      throw new RangeError('NdjsonLineReader maxLineBytes must be a positive safe integer');
+    }
+    this.maxLineBytes = maxLineBytes;
+  }
+
+  /** Adjusts the active single-line byte cap for subsequent reads. */
+  setMaxLineBytes(maxLineBytes: number): void {
+    if (!Number.isSafeInteger(maxLineBytes) || maxLineBytes <= 0) {
+      throw new RangeError('NdjsonLineReader maxLineBytes must be a positive safe integer');
+    }
+    this.maxLineBytes = maxLineBytes;
+  }
+
+  /** @throws if a complete line or the still-unterminated remainder exceeds the active line-byte cap. */
   push(chunk: Buffer): string[] {
+    const firstNewline = chunk.indexOf(0x0a);
+    if (firstNewline === -1) {
+      if (this.pending.length + chunk.length > this.maxLineBytes) {
+        this.pending = Buffer.alloc(0);
+        throw new Error(`NDJSON line exceeded ${this.maxLineBytes} bytes without a terminating newline`);
+      }
+    } else if (this.pending.length + firstNewline > this.maxLineBytes) {
+      this.pending = Buffer.alloc(0);
+      throw new Error(`NDJSON line exceeded ${this.maxLineBytes} bytes`);
+    }
     this.pending = this.pending.length > 0 ? Buffer.concat([this.pending, chunk]) : chunk;
     const lines: string[] = [];
     let newlineIndex: number;
     // eslint-disable-next-line no-cond-assign
     while ((newlineIndex = this.pending.indexOf(0x0a)) !== -1) {
+      if (newlineIndex > this.maxLineBytes) {
+        this.pending = Buffer.alloc(0);
+        throw new Error(`NDJSON line exceeded ${this.maxLineBytes} bytes`);
+      }
       const line = this.pending.subarray(0, newlineIndex).toString('utf8');
       this.pending = this.pending.subarray(newlineIndex + 1);
       if (line.length > 0) lines.push(line);
     }
-    if (this.pending.length > MAX_LINE_BYTES) {
-      throw new Error(`NDJSON line exceeded ${MAX_LINE_BYTES} bytes without a terminating newline`);
+    if (this.pending.length > this.maxLineBytes) {
+      this.pending = Buffer.alloc(0);
+      throw new Error(`NDJSON line exceeded ${this.maxLineBytes} bytes without a terminating newline`);
     }
     return lines;
   }
@@ -441,8 +486,8 @@ export interface ControlStatusResult {
   outbound: import('./outbound-settlement.js').OutboundStatus;
   /** Redacted content-addressed status from the daemon's single local registry. */
   toolsets: McpToolsetRegistryStatus;
-  /** Redacted content-addressed status from the daemon's local skill registry. Absent only for an older control peer. */
-  skills?: SkillRegistryStatus;
+  /** Compact, redacted content-addressed status from the daemon's local skill registry. Absent only for an older control peer. */
+  skills?: ControlSkillRegistryStatus;
   /**
    * WP0: per-canonical-Agent-home execution serialization, counts only —
    * see {@link AgentHomeExecutionStatus}. Absent only for an older control
@@ -466,6 +511,37 @@ export interface ToolsetsReloadParams {
 export interface SkillsReloadParams {
   expectedRevision: string;
   skills: Record<string, SkillSource>;
+}
+
+function toControlSkillEntryStatus(entry: Readonly<SkillEntryStatus>): Readonly<ControlSkillEntryStatus> {
+  return Object.freeze({
+    id: entry.id,
+    sourceKind: 'path' in entry.source ? 'path' : 'pack',
+    name: entry.name,
+    contentHash: entry.contentHash,
+    ...(entry.packVersion === undefined ? {} : { packVersion: entry.packVersion }),
+    status: entry.status,
+  });
+}
+
+/** Projects an in-process skill status into the compact redacted control-IPC shape. */
+export function toControlSkillRegistryStatus(status: SkillRegistryStatus): ControlSkillRegistryStatus {
+  return Object.freeze({
+    revision: status.revision,
+    configuredSkills: status.configuredSkills,
+    skills: Object.freeze(status.skills.map(toControlSkillEntryStatus)),
+  });
+}
+
+/** Projects an in-process skill reload receipt into the compact redacted control-IPC shape. */
+export function toControlSkillReloadReceipt(receipt: SkillReloadReceipt): ControlSkillReloadReceipt {
+  return Object.freeze({
+    previousRevision: receipt.previousRevision,
+    revision: receipt.revision,
+    changed: receipt.changed,
+    configuredSkills: receipt.configuredSkills,
+    skills: Object.freeze(receipt.skills.map(toControlSkillEntryStatus)),
+  });
 }
 
 /** Maximum opaque pairing-code payload accepted over local control IPC. */

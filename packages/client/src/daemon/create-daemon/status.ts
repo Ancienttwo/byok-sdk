@@ -1,4 +1,4 @@
-import type { ControlStorageStatus, ControlStatusResult, ControlActiveTask } from '../control-protocol.js';
+import { toControlSkillRegistryStatus, type ControlStorageStatus, type ControlStatusResult, type ControlActiveTask } from '../control-protocol.js';
 import { TASK_TRANSITIONS } from '@byok-sdk/protocol';
 import type { AgentHomeExecutionStatus } from '../../agent-home.js';
 import type { OutboundStatus } from '../outbound-settlement.js';
@@ -70,7 +70,7 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
     operationalHealth: operationalHealth.snapshot(),
     outbound: outboundStatus(),
     toolsets: toolsetRegistry.status(),
-    skills: skillRegistry.status(),
+    skills: toControlSkillRegistryStatus(skillRegistry.status()),
     // WP0: same counts `Daemon.status()` reports, from the same reader.
     agentHomeExecution: agentHomeExecutionStatus(),
     ...(clockSkew === undefined ? {} : { clockSkew }),

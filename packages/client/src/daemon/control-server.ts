@@ -17,6 +17,7 @@ import {
   timingSafeEqualHex,
   ControlError,
   HANDSHAKE_TIMEOUT_MS,
+  MAX_AUTHENTICATED_REQUEST_LINE_BYTES,
   NdjsonLineReader,
   type ControlErrorShape,
 } from './control-protocol.js';
@@ -282,6 +283,7 @@ function handleConnection(
     }
     clearTimeout(handshakeTimer);
     phase = 'ready';
+    reader.setMaxLineBytes(MAX_AUTHENTICATED_REQUEST_LINE_BYTES);
     settleHandshake();
     sendFrame({ v: 1, ready: true });
   }

@@ -49,7 +49,8 @@ import {
   SKILL_PACK_RESPONSE_MAX_BYTES,
 } from './skill-pack-installer.js';
 
-const MAX_SKILL_PATH_CHARS = 4096;
+const MAX_SKILL_PATH_BYTES = 4096;
+const C0_CONTROL_PATTERN = /[\u0000-\u001f]/u;
 const SKILL_PACK_MAX_FILES = 64;
 const SKILL_PACK_NAME_MAX_LENGTH = 64;
 const SKILL_PACK_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
@@ -160,10 +161,6 @@ function digestJson(value: unknown): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex')}`;
 }
 
-function isNonEmptySingleLine(value: unknown, maxChars = MAX_SKILL_PATH_CHARS): value is string {
-  return typeof value === 'string' && value.trim().length > 0 && value.length <= maxChars && !/[\u0000\r\n]/u.test(value);
-}
-
 function isErrno(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && (error as NodeJS.ErrnoException).code === code;
 }
@@ -192,10 +189,31 @@ function validateSkillSource(skillId: SkillId, raw: unknown): SkillSource {
   }
   if (keys[0] === 'path') {
     const rawPath = record.path;
-    if (!isNonEmptySingleLine(rawPath) || !path.isAbsolute(rawPath)) {
+    if (typeof rawPath !== 'string') {
       throw new SkillRegistryError(
         'path_not_absolute',
-        `DaemonConfig.skills.${skillId}.path must be a non-empty single-line absolute path`,
+        `DaemonConfig.skills.${skillId}.path must be a non-empty absolute path`,
+        { skillId },
+      );
+    }
+    if (C0_CONTROL_PATTERN.test(rawPath)) {
+      throw new SkillRegistryError(
+        'path_unsafe',
+        `DaemonConfig.skills.${skillId}.path must not contain C0 control characters`,
+        { skillId },
+      );
+    }
+    if (Buffer.byteLength(rawPath, 'utf8') > MAX_SKILL_PATH_BYTES) {
+      throw new SkillRegistryError(
+        'path_unsafe',
+        `DaemonConfig.skills.${skillId}.path must not exceed ${MAX_SKILL_PATH_BYTES} UTF-8 bytes`,
+        { skillId },
+      );
+    }
+    if (rawPath.trim().length === 0 || !path.isAbsolute(rawPath)) {
+      throw new SkillRegistryError(
+        'path_not_absolute',
+        `DaemonConfig.skills.${skillId}.path must be a non-empty absolute path`,
         { skillId },
       );
     }

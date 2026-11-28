@@ -1,5 +1,5 @@
 import type { ControlMethods } from '../control-server.js';
-import { ControlError, parseEnrollmentPairParams, ENROLLMENT_PAIRING_CODE_MAX_BYTES, parseToolsetsReloadParams, parseSkillsReloadParams, parseApprovalsResolveParams, parseApprovalsRequestParams, parseTeamWorkspaceCreateParams, parseTeamWorkspaceJoinParams, parseTeamContextParams, parseTeamMessagePostParams, parseTeamMessageReadParams, parseTeamMessageAckParams, parseTeamNotificationSnapshotParams, parseTeamMessageInspectParams, parseAgentMessagePublishParams, parseMcpContextTokenParams, parseAgentResultSubmitParams, parseAgentMemoryRecallParams, parseAgentMemorySaveParams, type AssertionIssueResult, parseAssertionIssueParams, type TaskAssertionIssueResult, parseTaskAssertionIssueParams, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, parseShutdownParams } from '../control-protocol.js';
+import { ControlError, parseEnrollmentPairParams, ENROLLMENT_PAIRING_CODE_MAX_BYTES, parseToolsetsReloadParams, parseSkillsReloadParams, toControlSkillReloadReceipt, parseApprovalsResolveParams, parseApprovalsRequestParams, parseTeamWorkspaceCreateParams, parseTeamWorkspaceJoinParams, parseTeamContextParams, parseTeamMessagePostParams, parseTeamMessageReadParams, parseTeamMessageAckParams, parseTeamNotificationSnapshotParams, parseTeamMessageInspectParams, parseAgentMessagePublishParams, parseMcpContextTokenParams, parseAgentResultSubmitParams, parseAgentMemoryRecallParams, parseAgentMemorySaveParams, type AssertionIssueResult, parseAssertionIssueParams, type TaskAssertionIssueResult, parseTaskAssertionIssueParams, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, parseShutdownParams } from '../control-protocol.js';
 import { checkVerificationSecret } from '../device-member.js';
 import { type DeviceRecord, DeviceRecordRePairRequiredError } from '../store.js';
 import { PairedWithoutMemberError } from './support.js';
@@ -252,7 +252,7 @@ function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unar
         );
       }
       try {
-        return skillRegistry.reload(parsed.skills, parsed.expectedRevision);
+        return toControlSkillReloadReceipt(skillRegistry.reload(parsed.skills, parsed.expectedRevision));
       } catch (err) {
         if (err instanceof SkillRevisionConflictError) {
           throw new ControlError('revision_conflict', err.message);

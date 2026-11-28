@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -16,7 +17,22 @@ import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../bin/official-release';
 import { checkDaemonConfig } from '../daemon/config-schema/check';
 import { validateDaemonConfig } from '../daemon/config-schema/validate';
 import { connectControlClient } from '../daemon/control-client';
-import type { ControlStatusResult } from '../daemon/control-protocol';
+import {
+  CONTROL_PROTOCOL_VERSION,
+  MAX_AUTHENTICATED_REQUEST_LINE_BYTES,
+  MAX_LINE_BYTES,
+  NdjsonLineReader,
+  computeClientAuth,
+  computeServerProof,
+  controlEndpointPath,
+  controlTokenPath,
+  encodeFrame,
+  parseServerHello,
+  parseServerReady,
+  randomNonceHex,
+  toControlSkillRegistryStatus,
+  type ControlStatusResult,
+} from '../daemon/control-protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { resolveStorageConfig } from '../daemon/retention/config';
 import { StoragePressure } from '../daemon/retention/pressure';
@@ -37,7 +53,7 @@ import {
   SkillRegistryError,
   SkillRevisionConflictError,
 } from '../daemon/skill-registry';
-import type { SkillReloadReceipt, SkillSource } from '../types';
+import type { ControlSkillReloadReceipt, SkillSource } from '../types';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { FRESH_DAEMON_EGRESS } from './fixtures/fresh-offer';
@@ -248,6 +264,10 @@ describe('SkillRegistry: source resolution ({ path } file vs directory, { pack }
       packVersion: '1.2.3',
       status: 'verified',
     });
+    expect(toControlSkillRegistryStatus(registry.status()).skills).toEqual([
+      { id: 'review', sourceKind: 'path', name: 'review-local', contentHash: review.contentHash, status: 'verified' },
+      { id: 'workflow', sourceKind: 'pack', name: 'git-workflow', contentHash: workflow.contentHash, packVersion: '1.2.3', status: 'verified' },
+    ]);
   });
 });
 
@@ -319,6 +339,25 @@ describe('SkillRegistry: frontmatter, path, link, cap, and config rejections', (
       tooMany[`skill-${i}`] = { path: dir };
     }
     expectRegistryError(() => new SkillRegistry(tooMany), 'invalid_config');
+  });
+
+  it('rejects source.path over 4096 UTF-8 bytes and C0 control characters', async () => {
+    const cases: readonly { readonly label: string; readonly rawPath: string }[] = [
+      { label: 'ascii-4097-bytes', rawPath: `/${'a'.repeat(4096)}` },
+      { label: 'multibyte-4099-bytes-1367-chars', rawPath: `/${'中'.repeat(1366)}` },
+      { label: 'c0-nul', rawPath: '/tmp/skill\u0000a' },
+      { label: 'c0-soh', rawPath: '/tmp/skill\u0001a' },
+      { label: 'c0-tab', rawPath: '/tmp/skill\ta' },
+      { label: 'c0-lf', rawPath: '/tmp/skill\na' },
+      { label: 'c0-cr', rawPath: '/tmp/skill\ra' },
+      { label: 'c0-us', rawPath: '/tmp/skill\u001fa' },
+    ];
+    for (const testCase of cases) {
+      expectRegistryError(
+        () => new SkillRegistry({ [testCase.label]: { path: testCase.rawPath } }),
+        'path_unsafe',
+      );
+    }
   });
 
   it('rejects unsafe relative paths (dotfiles, bad characters) inside a skill directory', async () => {
@@ -799,15 +838,34 @@ describe('DaemonConfig.skills schema, Daemon.status().skills, reloadSkills, and 
     if (!conn.ok) throw new Error(`expected control socket: ${conn.reason}`);
     try {
       const statusBefore = await conn.client.request<ControlStatusResult>('status');
-      expect(statusBefore.skills).toEqual(daemon.status().skills);
+      expect(statusBefore.skills).toEqual(toControlSkillRegistryStatus(daemon.status().skills));
+      expect(statusBefore.skills?.skills).toEqual([
+        {
+          id: 'alpha',
+          sourceKind: 'path',
+          name: 'alpha',
+          contentHash: daemon.status().skills.skills[0]!.contentHash,
+          status: 'verified',
+        },
+      ]);
+      expect(JSON.stringify(statusBefore.skills)).not.toContain(dirA);
+      expect(JSON.stringify(statusBefore.skills)).not.toContain('Alpha skill.');
+      // In-process Daemon.status().skills keeps source and description (#2562).
+      expect(daemon.status().skills.skills[0]).toMatchObject({
+        source: { path: dirA },
+        description: 'Alpha skill.',
+      });
 
-      const receipt = await conn.client.request<SkillReloadReceipt>('skills.reload', {
+      const receipt = await conn.client.request<ControlSkillReloadReceipt>('skills.reload', {
         expectedRevision: rev1,
         skills: { alpha: { path: dirA }, beta: { path: dirB } },
       });
       expect(receipt.changed).toBe(true);
       expect(receipt.previousRevision).toBe(rev1);
       expect(receipt.configuredSkills).toEqual(['alpha', 'beta']);
+      expect(receipt.skills.every((row) => row.sourceKind === 'path' && !('source' in row) && !('description' in row))).toBe(true);
+      expect(JSON.stringify(receipt)).not.toContain(dirA);
+      expect(JSON.stringify(receipt)).not.toContain(dirB);
       expect(daemon.status().skills.revision).toBe(receipt.revision);
 
       // Stale revision -> revision_conflict.
@@ -831,5 +889,149 @@ describe('DaemonConfig.skills schema, Daemon.status().skills, reloadSkills, and 
     } finally {
       conn.client.close();
     }
+  });
+
+  it('enforces NdjsonLineReader terminated and unterminated bounds before and after setMaxLineBytes', () => {
+    const preAuth = new NdjsonLineReader();
+    expect(preAuth.push(Buffer.from(`${'a'.repeat(MAX_LINE_BYTES)}\n`))).toHaveLength(1);
+    expect(() => preAuth.push(Buffer.from(`${'a'.repeat(MAX_LINE_BYTES + 1)}\n`))).toThrow(
+      `NDJSON line exceeded ${MAX_LINE_BYTES} bytes`,
+    );
+    expect(() => preAuth.push(Buffer.from('a'.repeat(MAX_LINE_BYTES + 1)))).toThrow(
+      `NDJSON line exceeded ${MAX_LINE_BYTES} bytes without a terminating newline`,
+    );
+
+    const postAuth = new NdjsonLineReader();
+    postAuth.setMaxLineBytes(MAX_AUTHENTICATED_REQUEST_LINE_BYTES);
+    const largeLine = 'b'.repeat(200 * 1024);
+    expect(postAuth.push(Buffer.from(`${largeLine}\n`))).toEqual([largeLine]);
+    expect(() => postAuth.push(Buffer.from(`${'c'.repeat(MAX_AUTHENTICATED_REQUEST_LINE_BYTES + 1)}\n`))).toThrow(
+      `NDJSON line exceeded ${MAX_AUTHENTICATED_REQUEST_LINE_BYTES} bytes`,
+    );
+    expect(() => postAuth.push(Buffer.from('c'.repeat(MAX_AUTHENTICATED_REQUEST_LINE_BYTES + 1)))).toThrow(
+      `NDJSON line exceeded ${MAX_AUTHENTICATED_REQUEST_LINE_BYTES} bytes without a terminating newline`,
+    );
+  });
+
+  it('handles 64 max-CJK skills and >64 KiB authenticated skills.reload over control IPC while refusing oversized pre-auth and post-auth frames', async () => {
+    const server = await TestServer.start();
+    activeServers.push(server);
+    const storeDir = await tmpDir('byok-daemon-skills-ipc-64-');
+    const cjkDescription = '技'.repeat(1024);
+    const skillDir = await writeLocalSkillDir({
+      [SKILL_PACK_ENTRY_PATH]: skillMarkdown('cjk-skill', cjkDescription, 'Body.\n'),
+    });
+
+    // 64 valid sources with ~2.5 KiB `./`-padded absolute paths (<= 4096 UTF-8 bytes each,
+    // > 170 KiB total inbound NDJSON frame) and 1024-char CJK descriptions (~3 KiB each).
+    const paddedRoot = path.parse(skillDir).root;
+    const relativeToRoot = skillDir.slice(paddedRoot.length);
+    const padCount = Math.floor((2750 - skillDir.length) / 2);
+    const paddedPath = `${paddedRoot}${'./'.repeat(padCount)}${relativeToRoot}`;
+    expect(Buffer.byteLength(paddedPath, 'utf8')).toBeLessThanOrEqual(4096);
+    expect(Buffer.byteLength(paddedPath, 'utf8')).toBeGreaterThan(2700);
+
+    const sixtyFourSkills: Record<string, SkillSource> = {};
+    for (let i = 0; i < CONFIGURED_SKILLS_MAX_ITEMS; i++) {
+      sixtyFourSkills[`skill-${String(i).padStart(2, '0')}`] = { path: paddedPath };
+    }
+    const inboundBytes = Buffer.byteLength(
+      encodeFrame({ v: CONTROL_PROTOCOL_VERSION, id: 'c1', method: 'skills.reload', params: { expectedRevision: `sha256:${'0'.repeat(64)}`, skills: sixtyFourSkills } }),
+      'utf8',
+    );
+    expect(inboundBytes).toBeGreaterThan(172_500);
+    expect(inboundBytes).toBeLessThan(MAX_AUTHENTICATED_REQUEST_LINE_BYTES);
+
+    const config: DaemonConfig = {
+      localAgentRelease: { version: '0.0.0-test' },
+      productName: 'Acme',
+      productId: 'acme-daemon-skills-ipc-64',
+      serverUrl: server.url,
+      storeDir,
+      agentHome: testAgentHomeConfig(),
+      agentEgress: FRESH_DAEMON_EGRESS,
+      storage: { scratchRoot: testScratchRoot() },
+    };
+    const daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    activeDaemons.push(daemon);
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    await waitForDaemonOpen(daemon);
+
+    const conn = await connectControlClient({ storeDir, productId: config.productId });
+    if (!conn.ok) throw new Error(`expected control socket: ${conn.reason}`);
+    try {
+      const initialStatus = await conn.client.request<ControlStatusResult>('status');
+      const receipt = await conn.client.request<ControlSkillReloadReceipt>('skills.reload', {
+        expectedRevision: initialStatus.skills!.revision,
+        skills: sixtyFourSkills,
+      });
+      expect(receipt.changed).toBe(true);
+      expect(receipt.configuredSkills).toHaveLength(CONFIGURED_SKILLS_MAX_ITEMS);
+      expect(receipt.skills).toHaveLength(CONFIGURED_SKILLS_MAX_ITEMS);
+      expect(Buffer.byteLength(encodeFrame({ v: 1, id: 'c1', ok: true, result: receipt }), 'utf8')).toBeLessThan(MAX_LINE_BYTES);
+      expect(JSON.stringify(receipt)).not.toContain(cjkDescription);
+      expect(JSON.stringify(receipt)).not.toContain(paddedPath);
+
+      const liveStatus = await conn.client.request<ControlStatusResult>('status');
+      expect(liveStatus.skills?.skills).toHaveLength(CONFIGURED_SKILLS_MAX_ITEMS);
+      expect(Buffer.byteLength(encodeFrame({ v: 1, id: 'c2', ok: true, result: liveStatus }), 'utf8')).toBeLessThan(MAX_LINE_BYTES);
+      expect(JSON.stringify(liveStatus.skills)).not.toContain(cjkDescription);
+
+      // In-process Daemon.status().skills still carries the raw source and CJK description.
+      expect(daemon.status().skills.skills).toHaveLength(CONFIGURED_SKILLS_MAX_ITEMS);
+      expect(daemon.status().skills.skills[0]?.description).toBe(cjkDescription);
+    } finally {
+      conn.client.close();
+    }
+
+    const endpoint = controlEndpointPath(config.productId, storeDir);
+    const token = (await fs.readFile(controlTokenPath(storeDir), 'utf8')).trim();
+    const waitClosed = (socket: net.Socket): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('socket did not close')), 3000);
+        socket.once('close', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+
+    // Pre-auth terminated frame > 64 KiB is refused fail-closed.
+    const preAuthSocket = net.createConnection(endpoint);
+    preAuthSocket.on('error', () => {});
+    const preAuthClosed = waitClosed(preAuthSocket);
+    preAuthSocket.once('connect', () => {
+      preAuthSocket.write(`${JSON.stringify({ v: 1, hello: 'client', nonce: 'a'.repeat(MAX_LINE_BYTES + 128) })}\n`);
+    });
+    await preAuthClosed;
+
+    // Post-auth terminated frame > 1 MiB is refused fail-closed.
+    const postAuthSocket = net.createConnection(endpoint);
+    postAuthSocket.on('error', () => {});
+    const postAuthClosed = waitClosed(postAuthSocket);
+    const clientNonce = randomNonceHex();
+    const rawReader = new NdjsonLineReader();
+    let phase: 'server-hello' | 'ready' | 'done' = 'server-hello';
+    postAuthSocket.on('data', (chunk: Buffer) => {
+      for (const line of rawReader.push(chunk)) {
+        const parsed = JSON.parse(line) as unknown;
+        if (phase === 'server-hello') {
+          const hello = parseServerHello(parsed);
+          if (!hello || hello.proof !== computeServerProof(token, clientNonce)) {
+            postAuthSocket.destroy();
+            return;
+          }
+          postAuthSocket.write(encodeFrame({ v: CONTROL_PROTOCOL_VERSION, auth: computeClientAuth(token, hello.nonce) }));
+          phase = 'ready';
+        } else if (phase === 'ready' && parseServerReady(parsed)) {
+          phase = 'done';
+          postAuthSocket.write(`${JSON.stringify({ v: 1, id: 'oversize', method: 'skills.reload', params: { pad: 'z'.repeat(MAX_AUTHENTICATED_REQUEST_LINE_BYTES + 128) } })}\n`);
+        }
+      }
+    });
+    postAuthSocket.once('connect', () => {
+      postAuthSocket.write(encodeFrame({ v: CONTROL_PROTOCOL_VERSION, hello: 'client', nonce: clientNonce }));
+    });
+    await postAuthClosed;
   });
 });

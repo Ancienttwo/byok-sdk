@@ -105,6 +105,9 @@
 //   CompactResult -> dist/daemon/journal/journal.d.ts
 //   ConfirmDeviceMaintenanceInput -> dist/diagnostics/operator-actions.d.ts
 //   ConnectionState -> dist/daemon/connection-manager.d.ts
+//   ControlSkillEntryStatus -> dist/types.d.ts
+//   ControlSkillRegistryStatus -> dist/types.d.ts
+//   ControlSkillReloadReceipt -> dist/types.d.ts
 //   CopyAgentMemoryHelperAssetsOptions -> dist/util/agent-memory-helper-release.d.ts
 //   CopyPiRuntimeAssetsOptions -> dist/adapters/pi/runtime-assets.d.ts
 //   CopySdkNativeAssetsOptions -> dist/sdk-native-assets.d.ts
@@ -2323,7 +2326,7 @@ import type { DaemonLifecycle } from './daemon-lifecycle.js';
 import type { RuntimeObservation } from '../runtime-detection.js';
 import type { ServiceEnvironmentStatus } from '../login-shell-environment.js';
 import type { LocalAgentReleaseIdentity } from '../release-identity.js';
-import type { McpToolsetRegistryStatus, SkillRegistryStatus } from '../types.js';
+import type { ControlSkillRegistryStatus, McpToolsetRegistryStatus } from '../types.js';
 import type { AgentHomeExecutionStatus } from '../agent-home.js';
 import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation.js';
 // support
@@ -2363,7 +2366,7 @@ export interface ControlStatusResult {
     operationalHealth: OperationalHealthSnapshot;
     outbound: import('./outbound-settlement.js').OutboundStatus;
     toolsets: McpToolsetRegistryStatus;
-    skills?: SkillRegistryStatus;
+    skills?: ControlSkillRegistryStatus;
     agentHomeExecution?: AgentHomeExecutionStatus;
     clockSkew?: ClockSkewObservation;
 }
@@ -4460,7 +4463,7 @@ export interface FileScopeGrant {
 export { HostLayoutInputError, resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { StoreCompatibility } from '@byok-sdk/core';
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeInputImage, RuntimeInputOptions, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, SkillSource, SkillEntryStatus, SkillRegistryStatus, SkillReloadReceipt, ProjectedSkill, AgentEgressPolicy, } from './types.js';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeInputImage, RuntimeInputOptions, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, SkillSource, SkillEntryStatus, SkillRegistryStatus, SkillReloadReceipt, ControlSkillEntryStatus, ControlSkillRegistryStatus, ControlSkillReloadReceipt, ProjectedSkill, AgentEgressPolicy, } from './types.js';
 export type { AgentRef } from './agent-home.js';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeForeignLeaseError, AgentHomeLeaseMarkerMismatchError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store.js';
@@ -6426,6 +6429,26 @@ export interface SkillReloadReceipt {
     readonly changed: boolean;
     readonly configuredSkills: readonly SkillId[];
     readonly skills: readonly Readonly<SkillEntryStatus>[];
+}
+export interface ControlSkillEntryStatus {
+    readonly id: SkillId;
+    readonly sourceKind: 'path' | 'pack';
+    readonly name: string;
+    readonly contentHash: ContentHash;
+    readonly packVersion?: string;
+    readonly status: 'verified';
+}
+export interface ControlSkillRegistryStatus {
+    readonly revision: string;
+    readonly configuredSkills: readonly SkillId[];
+    readonly skills: readonly Readonly<ControlSkillEntryStatus>[];
+}
+export interface ControlSkillReloadReceipt {
+    readonly previousRevision: string;
+    readonly revision: string;
+    readonly changed: boolean;
+    readonly configuredSkills: readonly SkillId[];
+    readonly skills: readonly Readonly<ControlSkillEntryStatus>[];
 }
 export interface ProjectedSkill {
     readonly id: SkillId;

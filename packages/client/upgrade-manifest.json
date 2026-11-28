@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "2ec5688ee950007c27244aa1f9ab718020530e179baabb95f74ccbd799fde247"
+    "snapshotSha256": "b408b1c1e5f996ecd692367a8cfb75decd1e5212e425194d765abddaf9b2ec5b"
   },
   "configFields": {
     "status": "tracked",
@@ -174,6 +174,43 @@
         "export:@byok-sdk/bot-collaboration#TeamSnapshotBot",
         "export:@byok-sdk/bot-collaboration/host-kit#BotProfile"
       ]
+    },
+    {
+      "id": "task-scoped-skills-registry",
+      "impact": "additive",
+      "summary": "@byok-sdk/client adds DaemonConfig.skills, the synchronous bytes-locked SkillRegistry (with SkillRegistryError, SkillRevisionConflictError, and SkillProjectionIntegrityError), Daemon.status().skills, Daemon.reloadSkills, control-socket skills.reload, and redacted effective-config skill reporting. Retention protects pinned skill-pack revisions referenced by the live snapshot.",
+      "migration": "docs/spec.md#local-skill-registry-and-bytes-locked-snapshot",
+      "items": [
+        "config:skills",
+        "export:@byok-sdk/client#ControlSkillEntryStatus",
+        "export:@byok-sdk/client#ControlSkillRegistryStatus",
+        "export:@byok-sdk/client#ControlSkillReloadReceipt",
+        "export:@byok-sdk/client#Daemon",
+        "export:@byok-sdk/client#DaemonConfig",
+        "export:@byok-sdk/client#DaemonEffectiveConfig",
+        "export:@byok-sdk/client#DaemonEffectiveSkill",
+        "export:@byok-sdk/client#DaemonEffectiveSkills",
+        "export:@byok-sdk/client#DaemonStatus",
+        "export:@byok-sdk/client#DiagnosticsSnapshot",
+        "export:@byok-sdk/client#PinnedSkillFile",
+        "export:@byok-sdk/client#ProjectedSkill",
+        "export:@byok-sdk/client#ResolvedSkillSnapshot",
+        "export:@byok-sdk/client#SKILL_PROJECTION_INTEGRITY_REASONS",
+        "export:@byok-sdk/client#SKILL_REGISTRY_ERROR_CODES",
+        "export:@byok-sdk/client#SkillConfigInput",
+        "export:@byok-sdk/client#SkillEntryStatus",
+        "export:@byok-sdk/client#SkillProjectionIntegrityError",
+        "export:@byok-sdk/client#SkillProjectionIntegrityReason",
+        "export:@byok-sdk/client#SkillRegistry",
+        "export:@byok-sdk/client#SkillRegistryError",
+        "export:@byok-sdk/client#SkillRegistryErrorCode",
+        "export:@byok-sdk/client#SkillRegistryOptions",
+        "export:@byok-sdk/client#SkillRegistrySnapshot",
+        "export:@byok-sdk/client#SkillRegistryStatus",
+        "export:@byok-sdk/client#SkillReloadReceipt",
+        "export:@byok-sdk/client#SkillRevisionConflictError",
+        "export:@byok-sdk/client#SkillSource"
+      ]
     }
   ],
   "changes": [
@@ -183,6 +220,12 @@
       "before": "optional schema-sha256=18d06e34b46dd3d1",
       "after": "optional schema-sha256=553ef9189423bdfc",
       "entry": "cursor-agent-cli"
+    },
+    {
+      "item": "config:skills",
+      "change": "added",
+      "after": "optional schema-sha256=104780b58fa29a70",
+      "entry": "task-scoped-skills-registry"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#TeamSnapshotBot",
@@ -200,6 +243,21 @@
       "entry": "antigravity-account-usage-options"
     },
     {
+      "item": "export:@byok-sdk/client#ControlSkillEntryStatus",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#ControlSkillRegistryStatus",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#ControlSkillReloadReceipt",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
       "item": "export:@byok-sdk/client#CursorAdapter",
       "change": "added",
       "entry": "cursor-agent-cli"
@@ -208,6 +266,56 @@
       "item": "export:@byok-sdk/client#CursorAdapterOptions",
       "change": "added",
       "entry": "cursor-agent-cli"
+    },
+    {
+      "item": "export:@byok-sdk/client#Daemon",
+      "change": "changed",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfig",
+      "change": "changed",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveConfig",
+      "change": "changed",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveSkill",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveSkills",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonStatus",
+      "change": "changed",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
+      "change": "changed",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#PinnedSkillFile",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#ProjectedSkill",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#ResolvedSkillSnapshot",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeAdapter",
@@ -230,9 +338,84 @@
       "entry": "harness-service-tier"
     },
     {
+      "item": "export:@byok-sdk/client#SKILL_PROJECTION_INTEGRITY_REASONS",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SKILL_REGISTRY_ERROR_CODES",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
       "item": "export:@byok-sdk/client#SUGGESTED_RUNTIME_VERSIONS_URL",
       "change": "added",
       "entry": "suggested-runtime-versions"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillConfigInput",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillEntryStatus",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillProjectionIntegrityError",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillProjectionIntegrityReason",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillRegistry",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillRegistryError",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillRegistryErrorCode",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillRegistryOptions",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillRegistrySnapshot",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillRegistryStatus",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillReloadReceipt",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillRevisionConflictError",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
+    },
+    {
+      "item": "export:@byok-sdk/client#SkillSource",
+      "change": "added",
+      "entry": "task-scoped-skills-registry"
     },
     {
       "item": "export:@byok-sdk/client#SuggestedRuntimeVersionAdvice",

@@ -36,6 +36,9 @@ export type {
   SkillEntryStatus,
   SkillRegistryStatus,
   SkillReloadReceipt,
+  ControlSkillEntryStatus,
+  ControlSkillRegistryStatus,
+  ControlSkillReloadReceipt,
   ProjectedSkill,
   AgentEgressPolicy,
 } from './types.js';

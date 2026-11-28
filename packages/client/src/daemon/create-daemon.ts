@@ -675,7 +675,7 @@ export interface DaemonStatus {
   operationalHealth: OperationalHealthSnapshot;
   /** Redacted, content-addressed device-local MCP registry status. */
   toolsets: McpToolsetRegistryStatus;
-  /** Redacted, content-addressed device-local skill registry status. */
+  /** Content-addressed device-local skill registry status (in-process; carries configured sources and descriptions). */
   skills: SkillRegistryStatus;
   /** Content-free egress lane watermarks and typed last-drop facts. */
   egress: AgentEgressStatus;
