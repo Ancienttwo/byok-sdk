@@ -978,7 +978,7 @@ export function selectImpact(paths, context = {}) {
       dirs.add(dir); continue;
     }
     if (dir === 'examples/desktop-bot-app'
-      && /^nsh-app\/(?:nsh\.(?:json|lock)|tsconfig\.json|capabilities\.expected\.json|App(?:\.test)?\.tsx|src\/.+\.tsx?|assets\/tray\/(?:[A-Za-z0-9@-]+\.png|trayTemplate\.svg))$/.test(relative)) {
+      && /^nsh-app\/(?:nsh\.(?:json|lock)|tsconfig\.json|capabilities\.expected\.json|App(?:\.test)?\.tsx|src\/.+\.tsx?|locales\/(?:en|zh-Hans|zh-Hant)\.json|src\/features\/gallery\/translations\.json|assets\/tray\/(?:[A-Za-z0-9@-]+\.png|trayTemplate\.svg))$/.test(relative)) {
       dirs.add(dir); continue;
     }
     if (dir === 'examples/desktop-bot-app'

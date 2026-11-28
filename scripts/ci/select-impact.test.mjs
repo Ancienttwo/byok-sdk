@@ -406,6 +406,10 @@ test('a platform family is selected only by a path it owns', () => {
     'nsh-app/App.test.tsx',
     'nsh-app/src/bridge.ts',
     'nsh-app/src/ui/Button.tsx',
+    'nsh-app/locales/en.json',
+    'nsh-app/locales/zh-Hans.json',
+    'nsh-app/locales/zh-Hant.json',
+    'nsh-app/src/features/gallery/translations.json',
     'nsh-app/assets/tray/tray.png',
     'nsh-app/assets/tray/trayTemplate@2x.png',
     'nsh-app/assets/tray/trayTemplate.svg',
@@ -418,7 +422,8 @@ test('a platform family is selected only by a path it owns', () => {
     'scripts/nsh.test.mjs',
   ]) {
     const impact = selectImpact([`examples/desktop-bot-app/${path}`]);
-    assert.ok(impact.families.includes('desktop') && impact.dirs.includes('examples/desktop-bot-app'), path);
+    assert.deepEqual(impact.families, ['desktop'], path);
+    assert.deepEqual(impact.dirs, ['examples/desktop-bot-app'], path);
   }
   for (const path of [
     'examples/desktop-bot-app/nsh-app/ext/other/x.rs',
