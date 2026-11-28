@@ -6,6 +6,7 @@ import { ActivityScreen } from "./src/features/activity/ActivityScreen.tsx";
 import { ConversationScreen } from "./src/features/conversation/ConversationScreen.tsx";
 import { GalleryScreen } from "./src/features/gallery/GalleryScreen.tsx";
 import { KeysScreen } from "./src/features/keys/KeysScreen.tsx";
+import { OnboardingScreen } from "./src/features/onboarding/OnboardingScreen.tsx";
 import { SettingsScreen } from "./src/features/settings/SettingsScreen.tsx";
 import { RecoveryPanel } from "./src/features/shell/RecoveryPanel.tsx";
 import { ShellSidebar } from "./src/features/shell/ShellSidebar.tsx";
@@ -16,6 +17,7 @@ import {
   hostState,
   isQuitting,
   isRecoveryBusy,
+  onboardingPending,
   powerError,
   requestQuit,
   restartHost,
@@ -23,11 +25,12 @@ import {
   setAppearance,
   shellStart,
   showMainWindow,
+  showOnboarding,
   startShell,
   stateHintCount,
   type WorkspaceSection,
 } from "./src/store.ts";
-import { Card, ToastRegion, type ToastNotice } from "./src/ui/index.ts";
+import { Card, Spinner, ToastRegion, type ToastNotice } from "./src/ui/index.ts";
 
 const SECTION_TITLES: Record<WorkspaceSection, string> = {
   conversation: "Conversation",
@@ -112,24 +115,34 @@ export function App() {
 
           <RecoveryPanel />
 
-          <If when={activeSection() === "keys"}>
+          <If when={onboardingPending()}>
+            <View testID="onboarding-pending" class="py-8 items-center justify-center">
+              <Spinner label="Loading…" />
+            </View>
+          </If>
+
+          <If when={showOnboarding()}>
+            <OnboardingScreen />
+          </If>
+
+          <If when={!onboardingPending() && !showOnboarding() && activeSection() === "keys"}>
             <KeysScreen onNotify={pushToast} />
           </If>
 
-          <If when={activeSection() === "settings"}>
+          <If when={!onboardingPending() && !showOnboarding() && activeSection() === "settings"}>
             <SettingsScreen />
           </If>
 
-          <If when={activeSection() === "conversation"}>
+          <If when={!onboardingPending() && !showOnboarding() && activeSection() === "conversation"}>
             <ConversationScreen />
           </If>
 
-          <If when={activeSection() === "activity"}>
+          <If when={!onboardingPending() && !showOnboarding() && activeSection() === "activity"}>
             <ActivityScreen />
           </If>
 
           {process.env.NODE_ENV !== "production" ? (
-            <If when={activeSection() === "gallery"}>
+            <If when={!onboardingPending() && !showOnboarding() && activeSection() === "gallery"}>
               <GalleryScreen onNotify={pushToast} />
             </If>
           ) : null}

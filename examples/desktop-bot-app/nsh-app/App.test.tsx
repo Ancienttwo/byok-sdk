@@ -4,6 +4,15 @@ import { createBridge, submitSecret } from "./src/bridge.ts";
 import { parseAllowedExternalUrl } from "./src/links.ts";
 
 const RUNNING_HOST = { state: "running", pid: 1, activeWork: 0 };
+const RETURNING_BOT = {
+  id: "bot-1",
+  name: "Writer",
+  role: "Writes",
+  persona: "Short.",
+  model: "claude",
+  archived: false,
+  state: "idle",
+};
 
 /** Adapter stand-ins so `open("./App.tsx")` never starts a real Host supervisor; `stubs` add or override members. */
 function headlessShell(stubs: Record<string, {} | null | ((...args: any[]) => unknown)> = {}) {
@@ -163,7 +172,7 @@ describe("BYOK NSH Foundations Gallery", () => {
               return [];
             }
             if (method === "k8.view") {
-              return { bots: [], roles: [], models: [], busy: false };
+              return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
             }
             return null;
           },

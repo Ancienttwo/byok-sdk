@@ -26,6 +26,7 @@ const recoveryBusySignal = signal(false);
 const stateHintCountSignal = signal(0);
 const appearanceSignal = signal<AppearanceMode>("system");
 const activeSectionSignal = signal<WorkspaceSection>("keys");
+const onboardingDismissedSignal = signal(false);
 const shellStartSignal = signal<ShellStart>({ status: "pending" });
 const selectedBotIdSignal = signal<string | null>(null);
 const k8ReloadSignal = signal(0);
@@ -328,6 +329,24 @@ export const appearance = () => appearanceSignal();
 /** Active main workspace section (no hidden mounted trees). */
 export const activeSection = () => activeSectionSignal();
 
+/** Dismisses the first-run agent picker for the rest of the current session. */
+export function dismissOnboarding(): void {
+  onboardingDismissedSignal.set(true);
+}
+
+/** True while the first `k8.view` is in flight so first launch does not flash Keys or read `keys.list` prematurely. */
+export const onboardingPending = () =>
+  hostReady() && !onboardingDismissedSignal() && k8View() === undefined && k8View.error() === undefined;
+
+/** True on a first launch (no Bots ever created and no Pi key profile configured) until dismissed or settled. */
+export const showOnboarding = () => {
+  if (!hostReady() || onboardingDismissedSignal() || k8View.error() !== undefined) {
+    return false;
+  }
+  const view = k8View();
+  return view !== undefined && view.bots.length === 0 && !view.models.some((model) => model.keyProfile);
+};
+
 /** Allows Gallery / showcase previews to inspect every Host-state badge token without touching live `hostReady()`. */
 export function setPreviewHostState(next: SupervisedHostState | null): void {
   previewHostStateSignal.set(next);
@@ -335,6 +354,7 @@ export function setPreviewHostState(next: SupervisedHostState | null): void {
 
 /** Switches the active workspace section cleanly through the single store authority. */
 export function setActiveSection(section: WorkspaceSection): void {
+  onboardingDismissedSignal.set(true);
   activeSectionSignal.set(section);
   armBusyReread(untracked(() => k8View()?.busy === true));
 }

@@ -7,6 +7,15 @@ type TimelineItem = NonNullable<ActivityCard["timeline"]>["items"][number];
 type ApprovalItem = NonNullable<ActivityCard["approvals"]>["items"][number];
 
 const order = (taskId: string, offset: number) => ({ eventKeys: [], orderKey: { taskId, revision: 1, offset } });
+const RETURNING_BOT = {
+  id: "bot-1",
+  name: "Writer",
+  role: "Writes",
+  persona: "Short.",
+  model: "claude",
+  archived: false,
+  state: "idle",
+};
 
 function approval(overrides: Partial<ApprovalItem> = {}): ApprovalItem {
   return {
@@ -57,7 +66,7 @@ function activityShell(
       "ByokShell.call": (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "keys.list") return [];
-        if (method === "k8.view") return { bots: [], roles: [], models: [], busy: false };
+        if (method === "k8.view") return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
         if (method === "activity.cards") return cards();
         return decide(method, params);
       },
