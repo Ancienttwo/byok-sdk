@@ -11,7 +11,8 @@ import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
  * The version is synthetic and distinct from the official pin.
  */
 const INDIRECT_PI_PACKAGES = ['pi-telemetry', 'pi-schema', 'pi-tui', 'pi-codemode', 'pi-mcp'];
-const NEWER_INDIRECT_VERSION = '1.7.0';
+const [pinnedMajor, pinnedMinor] = OFFICIAL_PI_PROVENANCE.packageVersion.split('.');
+const NEWER_INDIRECT_VERSION = `${pinnedMajor}.${Number(pinnedMinor) + 1}.0`;
 const INDIRECT_MANIFEST = new RegExp(`[\\\\/]@earendil-works[\\\\/](?:${INDIRECT_PI_PACKAGES.join('|')})[\\\\/]package\\.json$`, 'u');
 
 // Every module in this graph that reads an installed indirect manifest sees the
