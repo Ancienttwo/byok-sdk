@@ -369,20 +369,28 @@ export class BotCollaboration {
       // #2334: a dream that no device has claimed yields to user input of its Bot.
       yieldUnclaimed: (state, intent) => dreamYield(stateOf(state.application as LedgerState['application']), intent.key) });
     // An exported domain stays as it was exported (#975), also across a restart.
-    if (!stateOf(persisted.application).switchExport) ledger.transaction(s => {
-      const state = stateOf(s.application);
-      if (options.team === 'external') {
-        state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}),
-          ...(options.rooms === 'external' ? { rooms: true as const } : {}) };
-      } else {
-        state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
-          model: Object.keys(this.models())[0]!, mainBot: true, archived: false, autonomy: DEFAULT_AUTONOMY,
-          revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
-          execution: structuredClone(options.execution) };
+    if (!stateOf(persisted.application).switchExport) {
+      try {
+        ledger.transaction(s => {
+          const state = stateOf(s.application);
+          if (options.team === 'external') {
+            state.team.external ??= { revision: 0, ...(options.persona === 'external' ? { persona: true as const } : {}),
+              ...(options.rooms === 'external' ? { rooms: true as const } : {}) };
+          } else {
+            state.team.bots[options.botId] ??= { id: options.botId, name: 'Main Bot', role: 'Team owner', persona: '',
+              model: Object.keys(this.models())[0]!, mainBot: true, archived: false, autonomy: DEFAULT_AUTONOMY,
+              revision: options.execution.payload.agentRef.profileRevision, readyRevision: options.execution.payload.agentRef.profileRevision,
+              execution: structuredClone(options.execution) };
+          }
+          // #1357: the stored templates become the Host's current ones. Frozen intents keep the execution they froze with.
+          applyModels(state, this.models(), options.readOnlyToolsets ?? []);
+        });
+      } catch (error) {
+        this.closed = true;
+        void this.core.close().catch(() => {});
+        throw error;
       }
-      // #1357: the stored templates become the Host's current ones. Frozen intents keep the execution they froze with.
-      applyModels(state, this.models(), options.readOnlyToolsets ?? []);
-    });
+    }
   }
   private models(): Record<string, ExecutionTemplate> { return this.options.models ?? { default: this.options.execution }; }
   /**

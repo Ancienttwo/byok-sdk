@@ -313,3 +313,107 @@ it('replays existing persisted Bot rows without skills cleanly at the same K8_FO
   expect(frozenSkills(tMain)).toEqual(['base']);
   expect(frozenSkills(tHelper)).toEqual(['base', 'review']);
 });
+
+it('closes the startup execution core when reopen refuses >16 merged skills so in-flight completions are not handled', async () => {
+  type ServerEvent = { kind: 'task.state'; taskId: string; state: 'Complete' };
+  const subscribers = new Set<{ push(event: ServerEvent): void; close(): void }>();
+  const submitted = new Map<string, { taskId: string; deviceId: string; payload: { agentRef: unknown } }>();
+  const terminals = new Map<string, unknown>();
+  const eventServer = {
+    executions: {
+      submit: async (input: { taskId: string; deviceId: string; payload: { agentRef: unknown } }) => {
+        submitted.set(input.taskId, input);
+        return {};
+      },
+    },
+    tasks: {
+      offer: async (taskId: string) => {
+        const input = submitted.get(taskId);
+        return input && { taskId, deviceId: input.deviceId, type: 'task.offer', payload: input.payload, delivered: true };
+      },
+      deviceTerminal: async (taskId: string) => {
+        const document = terminals.get(taskId);
+        return document === undefined ? undefined : { envelope: { type: 'task.complete', task_id: taskId, payload: { document } } };
+      },
+      attempt: async (taskId: string) => {
+        const input = submitted.get(taskId);
+        return input && { taskId, deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'completed', claimedExecutor: { id: 'pi' }, ownerDeviceId: input.deviceId };
+      },
+      cancel: async () => undefined,
+    },
+    wakes: { pending: async () => [], schedule: async () => undefined, cancel: async () => undefined },
+    events: {
+      subscribe: () => ({
+        [Symbol.asyncIterator]() {
+          const queue: ServerEvent[] = [];
+          let waiter: ((result: IteratorResult<ServerEvent>) => void) | undefined;
+          let done = false;
+          const sub = {
+            push(event: ServerEvent) {
+              if (done) return;
+              if (waiter) { const resolve = waiter; waiter = undefined; resolve({ value: event, done: false }); }
+              else queue.push(event);
+            },
+            close() {
+              done = true;
+              subscribers.delete(sub);
+              if (waiter) { const resolve = waiter; waiter = undefined; resolve({ value: undefined, done: true }); }
+            },
+          };
+          subscribers.add(sub);
+          return {
+            next: () => queue.length
+              ? Promise.resolve({ value: queue.shift()!, done: false })
+              : done ? Promise.resolve({ value: undefined as unknown as ServerEvent, done: true })
+                : new Promise<IteratorResult<ServerEvent>>(resolve => { waiter = resolve; }),
+            return: () => { sub.close(); return Promise.resolve({ value: undefined as unknown as ServerEvent, done: true }); },
+          };
+        },
+      }),
+    },
+    enqueueAgentHomeProjection: async () => undefined,
+    readAgentHomeProjection: async () => undefined,
+  } as unknown as ExecutionServer;
+
+  root = mkdtempSync(join(tmpdir(), 'k8-bot-skills-startup-'));
+  ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', botLedgerOptions);
+  const openWith = (models: Record<string, ExecutionTemplate>) => new BotCollaboration(eventServer as never, ledger!, {
+    botId: 'main',
+    execution: models.default!,
+    models,
+    connector: async () => null,
+    team: 'external',
+    persona: 'external',
+  });
+
+  host = openWith({ default: withTemplateSkills() });
+  await host.applyTeam({
+    revision: 1,
+    bots: [
+      botRow('main', { profileRevision: '1' }),
+      botRow('helper', { profileRevision: '1', skills: ['helper-only'] }),
+    ],
+  });
+  await host.personaReady('main', '1');
+  await host.personaReady('helper', '1');
+  const turnId = await host.input('k1', 'Start');
+  const taskId = host.core.intent(turnId)!.taskId;
+  expect(submitted.size).toBe(1);
+  expect(subscribers.size).toBe(1);
+  await host.close();
+  host = undefined;
+  expect(subscribers.size).toBe(0);
+
+  // Reopen with 16 distinct template skills: helper merges to 17 and constructor throws.
+  const sixteen = Array.from({ length: 16 }, (_, i) => `tpl-${i}` as SkillId);
+  expect(() => openWith({ default: withTemplateSkills(sixteen) })).toThrow('requiredSkills');
+
+  // Emit completion for the in-flight Main Turn; the refused Host must have unsubscribed and must not handle it or submit a continuation.
+  terminals.set(taskId, { delegate: [{ to: 'main', request: 'Continue' }] });
+  for (const sub of [...subscribers]) sub.push({ kind: 'task.state', taskId, state: 'Complete' });
+  await new Promise(resolve => setTimeout(resolve, 30));
+
+  expect(subscribers.size).toBe(0);
+  expect(submitted.size).toBe(1);
+  expect(Object.values(ledger.snapshot().intents).every(intent => intent.conclusion === undefined)).toBe(true);
+});
