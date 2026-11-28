@@ -210,7 +210,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
   });
   expect(manifest.packageVersion).toBe(manifest.release.version);
   expect(manifest.commit).toBe(manifest.release.gitCommit);
-  expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: 'byok/0.140.0', commit: '6800dbe0e7efa6d5ef8a9e516d070f1b906aa295' });
+  expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: 'byok/0.140.0', commit: 'b81dde56772ed063edc6764932b37cf7c8a0a0d3' });
   expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual([
     'contracts/failure.ts',
     'contracts/list-models.ts',
@@ -266,6 +266,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'shared/acp/effort.ts',
     'shared/acp/errors.ts',
     'shared/acp/failure.ts',
+    'shared/acp/initialize.ts',
     'shared/acp/opening.ts',
     'shared/acp/process.ts',
     'shared/acp/profile.ts',

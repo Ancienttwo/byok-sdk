@@ -8,6 +8,7 @@ const cursorProfile: AcpSessionProfile = {
   args: CURSOR_ACP_ARGS,
   capabilities: { queue: { durable: false }, attribution: 'opaque' },
   requestTimeoutMs: 30_000,
+  terminalCapability: false,
   clientCapabilitiesMeta: () => CURSOR_ACP_CLIENT_META,
   // ACP startup discovers existing CLI login. Sending authenticate can start browser login.
   // Cursor vendor requests are unregistered, so the protocol SDK returns method not found.

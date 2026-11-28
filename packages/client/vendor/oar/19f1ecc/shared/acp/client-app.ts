@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR bc1b2ac so no permission request gets a permissive fallback (Apache-2.0).
+// BYOK change: Modified from OAR 19f1ecc so no permission request gets a permissive fallback and terminal/create env values are redacted before recording (Apache-2.0).
 /* oxlint-disable typescript/promise-function-async -- SDK handlers deliberately return terminal promises directly. */
 import {
   client as createClient,
@@ -89,6 +89,17 @@ export function createAcpClientApp(
 
 export interface AcpClientTarget { readonly terminal: AcpTerminalHost; readonly hooks: AcpClientHooks; readonly receivedAt?: number; readonly active?: () => boolean }
 
+// BYOK change: redact every peer-supplied terminal/create env value before the
+// request is queued or recorded, independent of known credential patterns.
+function redactTerminalCreateParams(params: CreateTerminalRequest): CreateTerminalRequest {
+  const { args, env, ...rest } = params;
+  return {
+    ...rest,
+    ...(args === undefined ? {} : { args: [...args] }),
+    ...(env === undefined ? {} : { env: env.map((entry) => ({ ...entry, value: "[redacted]" })) }),
+  };
+}
+
 /** Shared and isolated connections use the same permission and terminal handlers. */
 export function createRoutedAcpClientApp(routing: {
   readonly target: (method: string, params: unknown, requestId: JsonRpcId) => Promise<AcpClientTarget>;
@@ -101,10 +112,12 @@ export function createRoutedAcpClientApp(routing: {
   const observed = <Params, Reply>(
     method: string,
     handle: (params: Params, terminal: AcpTerminalHost, hooks: AcpClientHooks) => Reply | Promise<Reply>,
+    sanitizeRecorded?: (params: Params) => unknown,
   ) => async (context: { readonly params: Params; readonly requestId: JsonRpcId; readonly signal: AbortSignal }): Promise<Reply> => {
     const id = requestIdOf(context);
-    const { terminal, hooks, receivedAt, active } = await routing.target(method, context.params, context.requestId);
-    hooks.requested(id, method, context.params, receivedAt);
+    const recordedParams = sanitizeRecorded === undefined ? context.params : sanitizeRecorded(context.params);
+    const { terminal, hooks, receivedAt, active } = await routing.target(method, recordedParams, context.requestId);
+    hooks.requested(id, method, recordedParams, receivedAt);
     try {
       context.signal.throwIfAborted();
       if (active?.() === false) { throw RequestError.invalidParams(undefined, "ACP native session no longer accepts host requests"); }
@@ -118,7 +131,7 @@ export function createRoutedAcpClientApp(routing: {
   };
   let app = createClient({ name: "oar" })
     .onRequest(methods.client.session.requestPermission, observed(methods.client.session.requestPermission, (params: RequestPermissionRequest, _terminal, hooks) => (hooks.permission ?? cancelPermission)(params)))
-    .onRequest(methods.client.terminal.create, observed(methods.client.terminal.create, (params: CreateTerminalRequest, terminal) => terminal.create(params)))
+    .onRequest(methods.client.terminal.create, observed(methods.client.terminal.create, (params: CreateTerminalRequest, terminal) => terminal.create(params), redactTerminalCreateParams))
     .onRequest(methods.client.terminal.output, observed(methods.client.terminal.output, (params: TerminalOutputRequest, terminal) => terminal.output(params)))
     .onRequest(methods.client.terminal.waitForExit, observed(methods.client.terminal.waitForExit, (params: WaitForTerminalExitRequest, terminal) => terminal.waitForExit(params)))
     .onRequest(methods.client.terminal.kill, observed(methods.client.terminal.kill, (params: KillTerminalRequest, terminal) => terminal.kill(params)))

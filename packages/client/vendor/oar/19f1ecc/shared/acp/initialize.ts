@@ -1,3 +1,4 @@
+// BYOK change: Modified from OAR 19f1ecc so an ACP profile can opt out of advertising clientCapabilities.terminal (Apache-2.0).
 /* oxlint-disable typescript/promise-function-async -- SDK request callbacks return the native promise. */
 import { methods, PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import type { SessionOptions } from "../../contracts/session.js";
@@ -23,7 +24,8 @@ export async function initializeAcpConnection(
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: {
         fs: { readTextFile: false, writeTextFile: false },
-        terminal: true,
+        // BYOK change: profiles that do not host terminals opt out of advertising terminal support.
+        terminal: profile.terminalCapability !== false,
         ...(capabilitiesMeta === undefined ? {} : { _meta: capabilitiesMeta }),
       },
       clientInfo: { name: "oar", version: "0.0.0" },

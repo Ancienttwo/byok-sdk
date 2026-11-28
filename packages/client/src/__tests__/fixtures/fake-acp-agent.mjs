@@ -79,6 +79,20 @@ const ask = (method, params) => new Promise((resolve) => {
   reverse.set(id, resolve);
   send({ id, method, params });
 });
+async function runCanaryTerminal(kind, value, outFile) {
+  const requestId = `client-${reverseId + 1}`;
+  const created = await ask('terminal/create', {
+    sessionId: SESSION,
+    command: process.execPath,
+    args: ['-e', 'require("node:fs").writeFileSync(process.argv[1], process.env.CANARY_ENV ?? ""); process.stdout.write("ran");', outFile],
+    cwd: process.cwd(),
+    env: [{ name: 'CANARY_ENV', value }],
+  });
+  const exit = await ask('terminal/wait_for_exit', { sessionId: SESSION, terminalId: created.terminalId });
+  const output = await ask('terminal/output', { sessionId: SESSION, terminalId: created.terminalId });
+  await ask('terminal/release', { sessionId: SESSION, terminalId: created.terminalId });
+  log({ kind, requestId, created, exit, output });
+}
 
 /** One prompt's answer, with Grok's per-prompt ledger in `_meta.usage`. */
 function answer(stopReason = 'end_turn') {
@@ -355,6 +369,11 @@ async function prompt(message) {
     log({ kind: 'terminal', created });
     pending.set(message.id, 'silent'); return;
   }
+  if (input === 'terminal-canary') {
+    await runCanaryTerminal('live-terminal', 'harmless-live-canary', process.env.FAKE_ACP_LIVE_TERMINAL_OUT);
+    result(message.id, answer());
+    return;
+  }
   if (input === 'terminal-env') {
     const created = await ask('terminal/create', { sessionId: SESSION, command: process.execPath,
       args: ['-e', 'console.log(JSON.stringify([process.env.FAKE_TERMINAL_MARK, process.env.CURSOR_API_KEY, process.env.cursor_website_url, process.env.OPENAI_API_KEY, process.env.FAKE_MALFORMED]))'],
@@ -425,6 +444,9 @@ async function request(message) {
       }
       log({ kind: 'open', method: message.method, params: message.params });
       log({ kind: 'native-session', sessionId: SESSION });
+      if (process.env.FAKE_ACP_PREBIND_TERMINAL_OUT) {
+        await runCanaryTerminal('prebind-terminal', 'harmless-prebind-canary', process.env.FAKE_ACP_PREBIND_TERMINAL_OUT);
+      }
       result(message.id, { sessionId: SESSION, configOptions: [...agyModels(), ...effortMenu()] });
       return;
     case 'session/resume':

@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.140.0",
-    "commit": "6800dbe0e7efa6d5ef8a9e516d070f1b906aa295"
+    "commit": "b81dde56772ed063edc6764932b37cf7c8a0a0d3"
   },
   "release": {
     "ecosystem": "npm",
@@ -907,8 +907,8 @@
       "path": "shared/acp/client-app.ts",
       "sourcePath": "packages/oar/src/shared/acp/client-app.ts",
       "upstreamSha256": "3fa6e13b3f3fb53dfe4809b64b0de0caf739f43ecf7e771a71b028c39aaca432",
-      "vendoredSha256": "cea0d89f019bfd32cc84a424e935c210f4cddfb7a6ee50469bc4032e1f909c45",
-      "delta": "No permissive fallback: every session/request_permission is answered cancelled (cancelPermission) instead of the broadest allow on offer, unless the caller passes its own answer (AcpClientHooks.permission). The request and the answer stay recorded. Upstream routed request targets, terminal handlers and wire-phase notification routing are retained."
+      "vendoredSha256": "ca3f81f5a268aad0d3a688a8c2082981c0c0db923cef6818790caa58657293d2",
+      "delta": "No permissive fallback: every session/request_permission is answered cancelled (cancelPermission) instead of the broadest allow on offer, unless the caller passes its own answer (AcpClientHooks.permission). The request and the answer stay recorded. Redact every peer-supplied terminal/create env value to \"[redacted]\" on a metadata clone before routing and recording (both pre-bind queueing and live kernel requests), keeping request ID, command, args, cwd and env names while passing the untouched params to terminal.create (#2571). Upstream routed request targets, terminal handlers and wire-phase notification routing are retained."
     },
     {
       "path": "shared/acp/config-updates.ts",
@@ -948,7 +948,8 @@
       "path": "shared/acp/initialize.ts",
       "sourcePath": "packages/oar/src/shared/acp/initialize.ts",
       "upstreamSha256": "ec18cebe079c142ad715ca431e05a7b0a8285ed91a352a382c2aa1e7354c9941",
-      "vendoredSha256": "ec18cebe079c142ad715ca431e05a7b0a8285ed91a352a382c2aa1e7354c9941"
+      "vendoredSha256": "5f5c79664385a815ac925c17906a330896a8763e86af0fd8b6ee6b366ffa0b80",
+      "delta": "Honor AcpSessionProfile.terminalCapability when advertising clientCapabilities.terminal (defaults to true; false opts out for profiles that do not host terminals, #2571)."
     },
     {
       "path": "shared/acp/input.ts",
@@ -1010,8 +1011,8 @@
       "path": "shared/acp/profile.ts",
       "sourcePath": "packages/oar/src/shared/acp/profile.ts",
       "upstreamSha256": "96c5c4dbb92cc7871c732a9d9973c8e306e99bb9abc09c00fc1d18e307ea2e24",
-      "vendoredSha256": "e15cdb2e1d907110ca9e34e363c74cbce7001a91343a741da4a606f266f531ed",
-      "delta": "Forward the caller’s cancellation signal to the startup gate."
+      "vendoredSha256": "978026fd32a98e58cc953115bd17635d47a86d92e66b03739537eb9c0c6336fe",
+      "delta": "Forward the caller’s cancellation signal to the startup gate, and add optional terminalCapability so profiles that do not host terminals can opt out of advertising clientCapabilities.terminal (#2571)."
     },
     {
       "path": "shared/acp/projection.ts",

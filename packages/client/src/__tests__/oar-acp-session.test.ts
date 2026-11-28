@@ -268,6 +268,56 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect(JSON.parse(facts(log).find(fact => fact.kind === 'terminal-env')?.output)).toEqual(['peer', null, null, null, null]);
   });
 
+  it('redacts terminal/create env values before pre-bind queueing and live recording while passing real env to the child (#2571)', async () => {
+    const { dir, log } = workspace();
+    const prebindOut = path.join(dir, 'prebind-env.txt');
+    const liveOut = path.join(dir, 'live-env.txt');
+    const records: RawEvent[] = [];
+    const session = await open({
+      PATH: process.env.PATH ?? '',
+      FAKE_ACP_LOG: log,
+      FAKE_ACP_PREBIND_TERMINAL_OUT: prebindOut,
+      FAKE_ACP_LIVE_TERMINAL_OUT: liveOut,
+    }, dir, { onRecord: record => records.push(record) });
+    await turn(session, records, 'terminal-canary');
+
+    const observedFacts = facts(log);
+    expect(observedFacts.find(fact => fact.kind === 'initialize')?.params.clientCapabilities.terminal).toBe(true);
+    const prebind = observedFacts.find(fact => fact.kind === 'prebind-terminal')!;
+    const postOpen = observedFacts.find(fact => fact.kind === 'live-terminal')!;
+    expect(readFileSync(prebindOut, 'utf8')).toBe('harmless-prebind-canary');
+    expect(readFileSync(liveOut, 'utf8')).toBe('harmless-live-canary');
+    expect(prebind.exit.exitCode).toBe(0);
+    expect(postOpen.exit.exitCode).toBe(0);
+
+    for (const stream of [records, session.records()]) {
+      const serialized = JSON.stringify(stream);
+      expect(serialized).not.toContain('harmless-prebind-canary');
+      expect(serialized).not.toContain('harmless-live-canary');
+      const sessionNewFrame = stream.find(record => record.kind === 'frame' && record.body.type === 'session/new')!;
+      const creates = stream.filter((record): record is RequestRecord =>
+        record.kind === 'request' && record.body.kind === 'native' && record.body.type === 'terminal/create');
+      expect(creates.map(record => record.id)).toEqual([prebind.requestId, postOpen.requestId]);
+      expect(creates[0]!.seq).toBeLessThan(sessionNewFrame.seq);
+      expect(creates[1]!.seq).toBeGreaterThan(sessionNewFrame.seq);
+      for (const [index, [fact, outFile]] of ([[prebind, prebindOut], [postOpen, liveOut]] as const).entries()) {
+        const request = creates[index]!;
+        expect(request.body).toMatchObject({
+          kind: 'native',
+          type: 'terminal/create',
+          native: {
+            command: process.execPath,
+            args: [expect.any(String), expect.any(String), outFile],
+            cwd: dir,
+            env: [{ name: 'CANARY_ENV', value: '[redacted]' }],
+          },
+        });
+        const response = stream.find(record => record.kind === 'response' && record.requestId === request.id);
+        expect(response?.body).toEqual({ kind: 'answered', native: { terminalId: fact.created.terminalId } });
+      }
+    }
+  });
+
   it('answers every permission request cancelled and records the request and answer', async () => {
     const { dir, log } = workspace();
     const records: RawEvent[] = [];

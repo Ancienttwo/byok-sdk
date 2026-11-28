@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR a122061 to forward caller cancellation to the startup gate (Apache-2.0).
+// BYOK change: Modified from OAR 19f1ecc to forward caller cancellation to the startup gate and allow opting out of clientCapabilities.terminal (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- Session profiles and assembly wire the native control, projection and lifecycle helpers. */
 /* oxlint-disable typescript/promise-function-async -- Deadline callbacks deliberately return the SDK's native promises. */
 import type { CompactionOperation } from "../manual-compaction.js";
@@ -55,6 +55,8 @@ export interface AcpSessionProfile extends AcpDerivedSessionHooks, AcpSteerReque
   readonly abortTimeoutMs?: number;
   /** Compatibility for agents that put a fully quoted shell line in `command`. */
   readonly terminalShellCommand?: boolean;
+  /** BYOK change: advertise `clientCapabilities.terminal` during `initialize`; defaults to true. */
+  readonly terminalCapability?: boolean;
   /**
    * Vendor notifications to record verbatim (children, tasks, usage).
    * The SDK only routes registered methods: list every known method.

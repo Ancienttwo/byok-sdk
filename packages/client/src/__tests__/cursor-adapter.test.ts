@@ -148,7 +148,7 @@ describe.skipIf(process.platform === 'win32')('Cursor fake CLI', () => {
     await session.followUp({ target: MODEL, effort: 'high', instruction: 'second' });
     expect(await turn(session)).toContainEqual({ type: 'turn_end' });
     await expect(session.steer('steer')).rejects.toBeInstanceOf(SteerUnsupportedError);
-    expect(box.facts().find(({ method }) => method === 'initialize')?.params).toMatchObject({ clientCapabilities: { _meta: { parameterizedModelPicker: true } } });
+    expect(box.facts().find(({ method }) => method === 'initialize')?.params).toMatchObject({ clientCapabilities: { terminal: false, _meta: { parameterizedModelPicker: true } } });
     expect(box.facts().filter(({ method }) => method === 'session/set_config_option').map(({ params }) => params)).toEqual([
       { sessionId: SESSION, configId: 'model', value: 'fixture-model' }, { sessionId: SESSION, configId: 'reasoning_effort', value: 'high' },
     ]);
