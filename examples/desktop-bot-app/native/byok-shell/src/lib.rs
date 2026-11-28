@@ -14,6 +14,7 @@ pub mod maintenance;
 pub mod power;
 pub mod recovery;
 pub mod router;
+pub mod update;
 
 pub use bridge::{
     BridgeClient, BridgeError, BridgeErrorCode, HostState, StopError, SupervisedHostState,

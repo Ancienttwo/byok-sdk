@@ -1,7 +1,7 @@
 //! Process-wide mutual exclusion lock across update, recovery, custody operations, and app quit draining.
 
 use std::fmt;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 /// Default maximum time [`MaintenanceLock::begin_quit`] waits for in-flight custody children
@@ -50,7 +50,7 @@ pub enum QuitOutcome {
     HandedOver,
 }
 
-type QuitListener = Box<dyn Fn() + Send + Sync>;
+type QuitListener = Arc<dyn Fn() + Send + Sync>;
 
 struct Inner {
     state: Mutex<LockState>,
@@ -173,13 +173,29 @@ impl MaintenanceLock {
     where
         F: Fn() + Send + Sync + 'static,
     {
+        self.register_quit_listener(Arc::new(listener));
+    }
+
+    pub(crate) fn listen_for_quit(
+        &self,
+        listener: impl Fn() + Send + Sync + 'static,
+    ) -> QuitSubscription {
+        let listener: QuitListener = Arc::new(listener);
+        self.register_quit_listener(Arc::clone(&listener));
+        QuitSubscription {
+            inner: Arc::downgrade(&self.inner),
+            listener,
+        }
+    }
+
+    fn register_quit_listener(&self, listener: QuitListener) {
         let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
         if guard.quitting {
             drop(guard);
             listener();
             return;
         }
-        guard.listeners.push(Box::new(listener));
+        guard.listeners.push(listener);
     }
 
     /// Marks app quit requested and notifies registered quit listeners off-lock without waiting
@@ -261,6 +277,22 @@ impl MaintenanceLock {
     }
 }
 
+pub(crate) struct QuitSubscription {
+    inner: Weak<Inner>,
+    listener: QuitListener,
+}
+
+impl Drop for QuitSubscription {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.upgrade() {
+            let mut state = inner.state.lock().expect("maintenance lock poisoned");
+            state
+                .listeners
+                .retain(|listener| !Arc::ptr_eq(listener, &self.listener));
+        }
+    }
+}
+
 /// Active maintenance guard controlling pending vs confirmed handover state before drop.
 pub struct MaintenanceGuard {
     inner: Arc<Inner>,
@@ -268,6 +300,12 @@ pub struct MaintenanceGuard {
 }
 
 impl MaintenanceGuard {
+    pub(crate) fn lock(&self) -> MaintenanceLock {
+        MaintenanceLock {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Marks external installer takeover as pending (blocks peers without releasing on drop unless confirmed).
     pub fn begin_pending(&self) {
         let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");

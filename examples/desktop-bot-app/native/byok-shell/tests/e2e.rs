@@ -17,6 +17,7 @@ use byok_shell::{
     run_restore, run_snapshot, run_snapshot_status, select_linux_backend, shell_restore,
     shell_start_fresh, spawn_host_child, submit_to_custody,
 };
+use byok_shell::update::{HandoverOutcome, SwapOutcome, UpdateInstaller, handover};
 use serde_json::{Value, json};
 
 struct TempDir(PathBuf);
@@ -150,6 +151,152 @@ where
         thread::sleep(Duration::from_millis(25));
     }
     cond()
+}
+
+struct FakeUpdate<F>(F);
+
+impl<F: FnOnce() -> SwapOutcome> UpdateInstaller for FakeUpdate<F> {
+    fn swap(self) -> SwapOutcome {
+        (self.0)()
+    }
+}
+
+fn update_host(dir: &TempDir, lock: &MaintenanceLock, mode: &str) -> HostSupervisor {
+    let spec = write_node_script(dir.path(), "update-host.cjs", r#"
+const fs = require('node:fs');
+const rl = require('node:readline');
+const { MODE, LAUNCHES, SNAPSHOT, RECOVERING, ALLOW_HELLO } = process.env;
+if (process.argv[2] === 'byok-desktop-snapshot') {
+  fs.writeFileSync(SNAPSHOT, process.argv[3]);
+  const result = MODE === 'snapshot' || MODE === 'recovery-fails' || MODE === 'quit'
+    ? { ok: false, code: 'snapshot_denied', message: 'Injected S1 refusal' }
+    : { ok: true, target: SNAPSHOT };
+  process.stdout.write(JSON.stringify(result) + '\n', () => process.exit(result.ok ? 0 : 1));
+} else {
+  const recovery = fs.existsSync(LAUNCHES);
+  fs.appendFileSync(LAUNCHES, process.pid + '\n');
+  rl.createInterface({ input: process.stdin }).on('line', (line) => {
+    const req = JSON.parse(line);
+    const write = (value, done) => process.stdout.write(JSON.stringify(value) + '\n', done);
+    if (req.method === 'hello') {
+      if (recovery && MODE === 'recovery-fails') process.exit(1);
+      const ready = () => {
+        write({ id: req.id, result: { bridgeVersion: req.params.bridgeVersion } });
+        write({ event: 'state', state: { state: 'running', pid: process.pid, activeWork: 0 } });
+      };
+      if (recovery && (MODE === 'rollback' || MODE === 'quit')) {
+        fs.writeFileSync(RECOVERING, 'hello');
+        const timer = setInterval(() => {
+          if (fs.existsSync(ALLOW_HELLO)) {
+            clearInterval(timer);
+            ready();
+          }
+        }, 10);
+      } else ready();
+    } else if (req.method === 'shutdown') {
+      write({ id: req.id, result: null }, () => process.exit(MODE === 'stop' && !recovery ? 1 : 0));
+    }
+  });
+}
+"#);
+    let spec = spec.with_env("MODE", mode);
+    let spec = [("LAUNCHES", "launches"), ("SNAPSHOT", "snapshot"), ("RECOVERING", "recovering"), ("ALLOW_HELLO", "allow-hello")]
+        .into_iter().fold(spec, |spec, (env, file)| {
+            spec.with_env(env, dir.path().join(file).to_string_lossy())
+        });
+    let mut config = HostSupervisorConfig::new(spec, BridgeContract::load().unwrap())
+        .with_maintenance_lock(lock.clone());
+    config.shutdown_grace = Duration::from_secs(2);
+    let host = HostSupervisor::new(config, |_| {}, || {});
+    host.start();
+    assert!(wait_until(Duration::from_secs(5), || matches!(host.last_state(), Some(SupervisedHostState::Running { .. }))));
+    host
+}
+
+#[test]
+fn update_stop_and_snapshot_errors_recover_only_after_old_host_hello() {
+    for (mode, code, recovered) in [
+        ("stop", "update_host_stop_failed", true),
+        ("snapshot", "update_snapshot_failed", true),
+        ("recovery-fails", "update_snapshot_failed", false),
+    ] {
+        let dir = TempDir::new("byok-update-recover");
+        let lock = MaintenanceLock::new();
+        let host = update_host(&dir, &lock, mode);
+        let error = handover(&lock, &host, "1.0.0", FakeUpdate(|| panic!("unexpected swap"))).unwrap_err();
+        assert_eq!(error.code, code);
+        assert_eq!(error.host_recovered, recovered);
+        assert_eq!(error.recovery_code, (!recovered).then_some("update_host_recovery_failed"));
+        assert!(!lock.is_handed_over());
+        assert!(lock.try_begin().is_ok());
+        if mode == "stop" {
+            assert!(!dir.path().join("snapshot").exists());
+        } else {
+            assert_eq!(fs::read_to_string(dir.path().join("snapshot")).unwrap(), "1.0.0");
+        }
+        assert_eq!(
+            matches!(host.last_state(), Some(SupervisedHostState::Running { .. })),
+            recovered,
+        );
+    }
+}
+
+#[test]
+fn update_rollback_keeps_maintenance_until_old_host_ready_and_quit_aborts_wait() {
+    for mode in ["rollback", "quit"] {
+        let dir = TempDir::new("byok-update-wait");
+        let lock = MaintenanceLock::new();
+        let host = Arc::new(update_host(&dir, &lock, mode));
+        thread::scope(|scope| {
+            let work = scope.spawn(|| handover(&lock, &host, "1.0.0", FakeUpdate(|| {
+                assert_eq!(mode, "rollback");
+                SwapOutcome::RolledBackVerified("Fake installer exited before takeover".into())
+            })));
+            assert!(wait_until(Duration::from_secs(3), || dir.path().join("recovering").exists()));
+            let router = ShellRouter::new(Arc::clone(&host), lock.clone(), "1.0.0");
+            let busy = router.restore("1.0.0", "2026-11-25T00-00-00.000Z", |_| panic!("restore restarted app"));
+            assert_eq!(busy.unwrap_err().code, "maintenance_busy");
+            assert!(!lock.is_handed_over());
+            if mode == "quit" {
+                assert_eq!(lock.begin_quit(), QuitOutcome::Quit);
+            } else {
+                fs::write(dir.path().join("allow-hello"), b"ready").unwrap();
+            }
+            let error = work.join().unwrap().unwrap_err();
+            assert_eq!(error.code, if mode == "rollback" { "update_install_failed" } else { "update_snapshot_failed" });
+            assert_eq!(error.host_recovered, mode == "rollback");
+            assert_eq!(error.recovery_code, None);
+        });
+    }
+}
+
+#[test]
+fn update_only_seals_maintenance_after_verified_swap() {
+    for corrupted in [false, true] {
+        let dir = TempDir::new("byok-update-swap");
+        let lock = MaintenanceLock::new();
+        let host = update_host(&dir, &lock, "swap");
+        let executable = dir.path().join("updated-exe");
+        let result = handover(&lock, &host, "1.0.0", FakeUpdate(|| {
+            assert_eq!(fs::read_to_string(dir.path().join("snapshot")).unwrap(), "1.0.0");
+            if corrupted {
+                SwapOutcome::InstallCorrupted("Injected incomplete rollback".into())
+            } else {
+                SwapOutcome::Swapped { executable: executable.clone() }
+            }
+        }));
+        if corrupted {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, "update_install_corrupted");
+            assert!(!error.host_recovered);
+            assert!(host.restart(&lock).is_err());
+            assert_eq!(lock.begin_quit(), QuitOutcome::Quit);
+        } else {
+            assert_eq!(result.unwrap(), HandoverOutcome::Swapped { executable });
+            assert_eq!(lock.begin_quit(), QuitOutcome::HandedOver);
+        }
+        assert_eq!(fs::read_to_string(dir.path().join("launches")).unwrap().lines().count(), 1);
+    }
 }
 
 #[test]

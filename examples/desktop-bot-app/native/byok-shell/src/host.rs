@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::process::Child;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -13,7 +14,7 @@ use crate::bridge::{
 };
 use crate::command::{HostCommandSpec, spawn_host_child};
 use crate::contract::BridgeContract;
-use crate::maintenance::{HandoverState, MaintenanceBusyError, MaintenanceLock};
+use crate::maintenance::{HandoverState, MaintenanceBusyError, MaintenanceGuard, MaintenanceLock};
 use crate::power::{
     DEFAULT_KEEP_AWAKE_REASON, DEFAULT_KEEP_AWAKE_WHO, KeepAwakeBackend, KeepAwakeGuard,
     PowerError, SystemKeepAwakeBackend,
@@ -345,6 +346,15 @@ struct SupervisorState {
     stop_authority: StopAuthority,
     attempt: u32,
     maintenance: Option<MaintenanceLock>,
+    recover_while_busy: bool,
+    install_corrupted: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum HandoverRecovery {
+    Running,
+    Quitting,
+    Failed,
 }
 
 struct SupervisorInner {
@@ -385,6 +395,7 @@ impl SupervisorInner {
                 return;
             }
             guard.last_state = Some(next.clone());
+            self.cv.notify_all();
         }
         (self.on_state)(next);
         self.coalescer.trigger();
@@ -435,6 +446,8 @@ impl HostSupervisor {
                 stop_authority: StopAuthority::NeverStarted,
                 attempt: 0,
                 maintenance,
+                recover_while_busy: false,
+                install_corrupted: false,
             }),
             cv: Condvar::new(),
             on_state: Arc::new(on_state),
@@ -476,6 +489,9 @@ impl HostSupervisor {
     pub fn start(&self) {
         let maintenance = {
             let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
+            if guard.install_corrupted {
+                return;
+            }
             if let Some(lock) = guard.maintenance.clone() {
                 lock
             } else {
@@ -487,7 +503,7 @@ impl HostSupervisor {
         };
         maintenance.with_launch_state(|gate| {
             let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
-            if guard.destroyed {
+            if guard.destroyed || guard.install_corrupted {
                 return;
             }
             if gate.quitting || gate.handover != HandoverState::None {
@@ -508,6 +524,9 @@ impl HostSupervisor {
         let maintenance_guard = maintenance.try_begin()?;
         let (existing_client, mut release_epoch) = {
             let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
+            if guard.install_corrupted {
+                return Err(MaintenanceBusyError);
+            }
             guard.stopping = true;
             guard.paused = true;
             self.inner.cv.notify_all();
@@ -564,6 +583,82 @@ impl HostSupervisor {
             guard.paused = false;
             self.inner.cv.notify_all();
         })
+    }
+
+    pub(crate) fn mark_install_corrupted(&self) {
+        let mut state = self.inner.state.lock().expect("supervisor lock poisoned");
+        state.install_corrupted = true;
+    }
+
+    // The handover owns `guard` until the replacement child has completed both hello and
+    // its Running push. A failed stop may still be draining the prior child.
+    pub(crate) fn recover_during_handover(&self, guard: &MaintenanceGuard) -> HandoverRecovery {
+        let maintenance = guard.lock();
+        let quitting = Arc::new(AtomicBool::new(false));
+        let quit_signal = Arc::clone(&quitting);
+        let inner = Arc::downgrade(&self.inner);
+        let _subscription = maintenance.listen_for_quit(move || {
+            if let Some(inner) = inner.upgrade() {
+                let _state = inner.state.lock().expect("supervisor lock poisoned");
+                quit_signal.store(true, Ordering::Release);
+                inner.cv.notify_all();
+            }
+        });
+        let mut state = self.inner.state.lock().expect("supervisor lock poisoned");
+        let grace = self.inner.config.shutdown_grace;
+        state = self
+            .inner
+            .cv
+            .wait_timeout_while(state, grace, |state| {
+                state.active_run && !quitting.load(Ordering::Acquire)
+            })
+            .expect("supervisor lock poisoned")
+            .0;
+        if quitting.load(Ordering::Acquire) {
+            return HandoverRecovery::Quitting;
+        }
+        if state.active_run || state.destroyed {
+            return HandoverRecovery::Failed;
+        }
+        let previous_run = state.run_seq;
+        state.maintenance = Some(maintenance);
+        state.last_state = None;
+        state.attempt = 0;
+        state.stopping = false;
+        state.paused = false;
+        state.recover_while_busy = true;
+        self.inner.cv.notify_all();
+        let running = |state: &SupervisorState| {
+            state.run_seq > previous_run
+                && state.client.is_some()
+                && matches!(state.last_state, Some(SupervisedHostState::Running { .. }))
+        };
+        state = self
+            .inner
+            .cv
+            .wait_timeout_while(state, grace, |state| {
+                let replacement_exited = state.run_seq > previous_run && !state.active_run;
+                !quitting.load(Ordering::Acquire)
+                    && !state.destroyed
+                    && !replacement_exited
+                    && !running(state)
+            })
+            .expect("supervisor lock poisoned")
+            .0;
+        let result = if quitting.load(Ordering::Acquire) {
+            HandoverRecovery::Quitting
+        } else if running(&state) {
+            HandoverRecovery::Running
+        } else {
+            HandoverRecovery::Failed
+        };
+        state.recover_while_busy = false;
+        if result != HandoverRecovery::Running {
+            state.stopping = true;
+            state.paused = true;
+            self.inner.cv.notify_all();
+        }
+        result
     }
 
     /// Returns the most recently observed Host state.
@@ -816,6 +911,7 @@ fn reserve_and_spawn(guard: &mut SupervisorState, inner: &SupervisorInner) -> La
     if guard.destroyed || guard.paused || guard.stopping || guard.client.is_some() {
         return LaunchDecision::RetryWait;
     }
+    guard.recover_while_busy = false;
     let spawn_result = spawn_host(inner);
     guard.run_seq = guard.run_seq.saturating_add(1);
     let run_id = guard.run_seq;
@@ -843,7 +939,7 @@ fn decide_launch(inner: &SupervisorInner, maintenance: Option<&MaintenanceLock>)
                 inner.cv.notify_all();
                 return LaunchDecision::RetryWait;
             }
-            if gate.busy {
+            if gate.busy && !guard.recover_while_busy {
                 return LaunchDecision::WaitBusy;
             }
             reserve_and_spawn(&mut guard, inner)

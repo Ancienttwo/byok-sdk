@@ -3,6 +3,7 @@
 mod bridge;
 mod quit;
 mod supervisor;
+mod updater;
 
 use byok_shell::EXPECTED_BRIDGE_VERSION;
 use nsh_core::JsonValue;
@@ -32,6 +33,26 @@ impl ByokShell {
     /// Restarts the active `HostSupervisor` off the engine thread after a stop or crash.
     pub async fn restart() -> Result<(), JsError> {
         supervisor::restart_supervisor().await
+    }
+
+    /// Checks the packaged update feed for a signed whole-app update.
+    pub async fn check_update(sys: System) -> Result<JsonValue, JsError> {
+        updater::check(sys).await
+    }
+
+    /// Downloads and stages the checked update while the Host continues to run.
+    pub async fn stage_update() -> Result<(), JsError> {
+        updater::stage().await
+    }
+
+    /// Discards a checked or staged update and releases the installation lock.
+    pub fn discard_update() -> Result<(), JsError> {
+        updater::discard()
+    }
+
+    /// Hands over to a staged update on an explicit user action.
+    pub async fn install_update() -> Result<(), JsError> {
+        updater::install().await
     }
 
     /// Returns whether the process-wide `HostSupervisor` singleton has been started.
