@@ -11,6 +11,16 @@ import type { CustodyChange } from "../../../../src/custody/protocol.ts";
 import { refusalOf, storedProfile, submitModelRoute } from "../../../../src/keys/submit.ts";
 import { createBridge } from "../../bridge.ts";
 
+const RETURNING_BOT = {
+  id: "bot-1",
+  name: "Writer",
+  role: "Writes",
+  persona: "Short.",
+  model: "claude",
+  archived: false,
+  state: "idle",
+};
+
 function makeStoredStatus(overrides: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
     profile_ref: "zai-main",
@@ -82,7 +92,7 @@ describe("KeysScreen (#2461 Slice 2)", () => {
           return {
             bots: [],
             roles: [],
-            models: [{ id: "zai-chat", label: "ZAI Chat" }],
+            models: [{ id: "zai-chat", label: "ZAI Chat", runtime: "pi", mcpToolsets: true, keyProfile: true }],
             busy: false,
           };
         }
@@ -210,7 +220,7 @@ describe("KeysScreen (#2461 Slice 2)", () => {
             return savedStatus;
           }
           if (method === "k8.view") {
-            return { bots: [], roles: [], models: [], busy: false };
+            return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
           }
           return null;
         }),
@@ -281,7 +291,7 @@ describe("KeysScreen (#2461 Slice 2)", () => {
           throw err;
         }
         if (method === "k8.view") {
-          return { bots: [], roles: [], models: [], busy: false };
+          return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
         }
         return null;
       }),
@@ -351,7 +361,7 @@ describe("KeysScreen (#2461 Slice 2)", () => {
             return existing;
           }
           if (method === "k8.view") {
-            return { bots: [], roles: [], models: [], busy: false };
+            return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
           }
           return null;
         }),
@@ -396,7 +406,7 @@ describe("KeysScreen (#2461 Slice 2)", () => {
           return [];
         }
         if (method === "k8.view") {
-          return { bots: [], roles: [], models: [], busy: false };
+          return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
         }
         return null;
       }),
@@ -417,7 +427,7 @@ describe("KeysScreen (#2461 Slice 2)", () => {
           return [];
         }
         if (method === "k8.view") {
-          return { bots: [], roles: [], models: [], busy: false };
+          return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
         }
         return null;
       }),

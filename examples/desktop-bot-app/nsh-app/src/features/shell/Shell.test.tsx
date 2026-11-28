@@ -6,6 +6,15 @@ import { BridgeCallError } from "../../bridge.ts";
 import { describeHostState, trayStatusLabel, type ShellStart } from "../../store.ts";
 
 const RUNNING_HOST: SupervisedHostState = { state: "running", pid: 4100, activeWork: 0 };
+const RETURNING_BOT = {
+  id: "bot-1",
+  name: "Writer",
+  role: "Writes",
+  persona: "Short.",
+  model: "claude",
+  archived: false,
+  state: "idle",
+};
 const PENDING: ShellStart = { status: "pending" };
 const STARTED: ShellStart = { status: "started" };
 const START_FAILED: ShellStart = {
@@ -77,7 +86,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
           return {
             bots: [],
             roles: [],
-            models: [{ id: "zai/glm-4.7", label: "ZAI GLM-4.7" }],
+            models: [{ id: "zai/glm-4.7", label: "ZAI GLM-4.7", runtime: "pi", mcpToolsets: true, keyProfile: true }],
             busy: false,
           };
         }
@@ -160,7 +169,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
           return updated;
         }
         if (method === "k8.view") {
-          return { bots: [], roles: [], models: [], busy: false };
+          return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
         }
         return null;
       }),
@@ -416,7 +425,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
           return [];
         }
         if (method === "k8.view") {
-          return { bots: [], roles: [], models: [], busy: false };
+          return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
         }
         return null;
       }),
@@ -450,7 +459,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
           return [];
         }
         if (method === "k8.view") {
-          return { bots: [], roles: [], models: [], busy: false };
+          return { bots: [RETURNING_BOT], roles: [], models: [], busy: false };
         }
         return null;
       }),

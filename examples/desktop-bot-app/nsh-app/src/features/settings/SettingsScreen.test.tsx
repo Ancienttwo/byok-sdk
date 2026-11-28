@@ -13,6 +13,15 @@ const MODELS = [
   { id: "m1", label: "Model One" },
   { id: "m2", label: "Model Two" },
 ];
+const RETURNING_BOT = {
+  id: "bot-1",
+  name: "Writer",
+  role: "Writes",
+  persona: "Short.",
+  model: "m1",
+  archived: false,
+  state: "idle",
+};
 
 const DEVICE: DeviceView = {
   paired: true,
@@ -58,7 +67,7 @@ function settingsShell(
       "ByokShell.call": (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "keys.list") return [];
-        if (method === "k8.view") return { bots: [], roles: [], models: MODELS, busy: false };
+        if (method === "k8.view") return { bots: [RETURNING_BOT], roles: [], models: MODELS, busy: false };
         if (method === "settings.device") return options.device ? options.device(params) : DEVICE;
         if (method === "settings.get") return { dreaming: (options.dreaming ?? (() => ({ enabled: true, models: ["m1"] })))() };
         if (method === "settings.setDreaming") return options.save?.(params) ?? { dreaming: params };
@@ -489,7 +498,7 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
           },
           "ByokShell.call": (method: string, params: any) => {
             calls.push({ method, params });
-            if (method === "k8.view") return { bots: [], roles: [], models: MODELS, busy: false };
+            if (method === "k8.view") return { bots: [RETURNING_BOT], roles: [], models: MODELS, busy: false };
             if (method === "settings.device") return DEVICE;
             if (method === "settings.get") return { dreaming: { enabled: true, models: ["m1"] } };
             if (method === "settings.loginItem") return { supported: true, enabled: false };
