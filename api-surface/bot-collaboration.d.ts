@@ -2401,7 +2401,7 @@ export type SyncStep<E> = {
 };
 export declare function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(state: SyncState<E>, turn: Turn, facts: SyncFacts, options: SyncOptions<R>, publish: Publish): SyncStep<E> | undefined;
 // ==== @byok-sdk/bot-collaboration dist/rules/team.d.ts ====
-import type { RoomFields } from '@byok-sdk/protocol';
+import type { RoomFields, SkillId } from '@byok-sdk/protocol';
 import { type MemberMentions } from './rooms.js';
 export declare function requireMain(team: {
     readonly bots: Readonly<Record<string, {
@@ -2423,6 +2423,7 @@ export interface TeamSnapshotBot {
     mainBot: boolean;
     profileRevision?: string;
     participation?: 'suspended';
+    skills?: readonly SkillId[];
 }
 export type TeamSnapshotRoom = RoomFields & {
     id: string;
@@ -2605,6 +2606,7 @@ export interface SwitchImport {
 }
 export declare function sealLedger(ledger: HostLedger, header: SwitchHeader): SwitchExport;
 // ==== @byok-sdk/bot-collaboration dist/team-model.d.ts ====
+import type { SkillId } from '@byok-sdk/protocol';
 import type { AgentHomeProjectionRequest } from '@byok-sdk/server';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import type { Room, Round, Seat } from './rules/rooms.js';
@@ -2623,6 +2625,7 @@ export interface BotProfile {
     readyRevision: string | null;
     autonomy?: Autonomy;
     participation?: 'suspended';
+    skills?: readonly SkillId[];
     execution: ExecutionTemplate;
 }
 // support

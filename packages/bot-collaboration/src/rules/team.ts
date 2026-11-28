@@ -1,5 +1,5 @@
-import { AgentHomeProjectionAgentRefSchema, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionValueSchema } from '@byok-sdk/protocol';
-import type { RoomFields } from '@byok-sdk/protocol';
+import { AgentHomeProjectionAgentRefSchema, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionValueSchema, RequiredSkillsSchema } from '@byok-sdk/protocol';
+import type { RoomFields, SkillId } from '@byok-sdk/protocol';
 import { roomFields, type MemberMentions, type Room } from './rooms.js';
 /** Team role checks as pure rules (#739 D1). They read only the Bot rows that the caller gives. */
 export function activeBot<B extends { readonly archived: boolean }>(team: { readonly bots: Readonly<Record<string, B>> }, id: string): B {
@@ -26,6 +26,8 @@ export interface TeamSnapshotBot {
   id: string; name: string; role: string; persona: string; model: string; mainBot: boolean; profileRevision?: string;
   /** #1319: the Bot stays in the team but takes no new K8 work. A later snapshot without it restores the Bot. */
   participation?: 'suspended';
+  /** #2578: Host-owned logical skill ids merged into the Bot's execution template as `requiredSkills` (empty normalizes to omitted). */
+  skills?: readonly SkillId[];
 }
 /** One room of an external team snapshot in the external rooms mode (#1321). Its members are Bots of the same snapshot. */
 export type TeamSnapshotRoom = RoomFields & { id: string; memberMentions?: MemberMentions };
@@ -86,6 +88,35 @@ export function profileRevision(value: unknown): string {
 export function profileProjection(bot: { readonly name: string; readonly role: string; readonly persona: string; readonly model: string }) {
   return { schemaVersion: 'bot-profile.v1', name: bot.name, role: bot.role, persona: bot.persona, model: bot.model };
 }
+function botSkills(value: unknown): SkillId[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error('Invalid team snapshot Bot skills: must be an array');
+  if (value.length === 0) return undefined;
+  const parsed = RequiredSkillsSchema.safeParse(value);
+  if (!parsed.success) throw new Error(`Invalid team snapshot Bot skills: ${parsed.error.issues[0]?.message ?? parsed.error.message}`);
+  return parsed.data;
+}
+/**
+ * Merges a model template's `requiredSkills` with a Bot's `skills` as a template-first deduplicated union,
+ * omitting `requiredSkills` when empty and refusing a combined list above 16 ids (#2578).
+ */
+export function withBotSkills<E extends { readonly payload: { readonly requiredSkills?: readonly SkillId[] } }>(
+  execution: E,
+  skills: readonly SkillId[] | undefined,
+): E {
+  const merged: SkillId[] = [];
+  const seen = new Set<SkillId>();
+  for (const id of [...(execution.payload.requiredSkills ?? []), ...(skills ?? [])]) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push(id);
+  }
+  const { requiredSkills: _prev, ...rest } = execution.payload;
+  if (merged.length === 0) return { ...execution, payload: rest } as E;
+  const parsed = RequiredSkillsSchema.safeParse(merged);
+  if (!parsed.success) throw new Error(`Bot execution requiredSkills invalid: ${parsed.error.issues[0]?.message ?? parsed.error.message}`);
+  return { ...execution, payload: { ...rest, requiredSkills: parsed.data } } as E;
+}
 /** A validated copy, with the Bots sorted by id: the Bot order is not content. */
 export function teamSnapshot(value: unknown): TeamSnapshot {
   const row = value as Partial<TeamSnapshot> | null;
@@ -102,10 +133,12 @@ export function teamSnapshot(value: unknown): TeamSnapshot {
     if (bot.id in Object.prototype || !AgentHomeProjectionAgentRefSchema.safeParse({ agentId: bot.id, profileRevision: '1' }).success) {
       throw new Error('Invalid team snapshot Bot id');
     }
+    const skills = botSkills(bot.skills);
     const row: TeamSnapshotBot = { id: bot.id, name: bot.name, role: bot.role, persona: bot.persona, model: bot.model, mainBot: bot.mainBot,
       ...(bot.profileRevision === undefined ? {} : { profileRevision: profileRevision(bot.profileRevision) }),
       // Only a suspended row carries the field, so a snapshot without it keeps its evidence.
-      ...(bot.participation ? { participation: bot.participation } : {}) };
+      ...(bot.participation ? { participation: bot.participation } : {}),
+      ...(skills === undefined ? {} : { skills }) };
     // A projection that the server refuses would leave the Bot never ready, so the snapshot is refused first.
     if (!AgentHomeProjectionValueSchema.safeParse(profileProjection(row)).success) throw new Error('Team snapshot Bot projection is too large');
     return row;

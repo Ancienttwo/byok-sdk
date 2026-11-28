@@ -46,6 +46,29 @@ it('promotes a valid harness-only Bot template without a native session request'
   expect(payload.nativeSessions).toBeUndefined();
   expect(HostOfferPlainPayloadSchema.safeParse(payload).success).toBe(true);
 });
+it('strips requiredSkills from both Bot-fallback and dedicated dream model templates (#2578)', () => {
+  for (const dedicated of [false, true]) {
+    const ledger = new HostLedger(':memory:', TENANT_A);
+    const cheap: ExecutionTemplate = { ...template('device'), payload: { ...template('device').payload, requiredSkills: ['dream.only'] } };
+    const models: Record<string, ExecutionTemplate> = dedicated ? { default: template('device'), cheap } : { default: template('device') };
+    const policy = dreamPolicy({ timeZone: ZONE, ...(dedicated ? { models: ['cheap'] } : {}) })!;
+    ledger.transaction(s => {
+      const state = stateOf(s.application); seedCollaboration(state); state.turns.t1!.status = 'succeeded';
+      state.team.bots.main!.skills = ['review'];
+      state.team.bots.main!.execution.payload = { ...state.team.bots.main!.execution.payload, requiredSkills: ['base', 'review'] };
+      reconcileDreamRoutines(s, policy, models, WINDOW_START);
+      const routine = Object.values(s.routines)[0]!, key = 'dream-key';
+      s.occurrences[key] = { key, routineId: routine.definition.id, definitionVersion: 1, trigger: { kind: 'scheduled', plannedAt: WINDOW_END },
+        wakeKey: 'wake', recordedAt: WINDOW_END, nextAt: null, hook: {}, attempts: 0 };
+      state.dreams!.open[key] = { botId: 'main', windowEnd: WINDOW_END };
+      syncDreams(s, { tenant: TENANT_A, policy, models, instructionMaxBytes: DEFAULT_INSTRUCTION_MAX_BYTES, now: WINDOW_END, refused: () => false, historyMode: false });
+    });
+    const { payload } = ledger.snapshot().intents[hash(occurrenceIntentKey('dream-key'))]!.execution as AgentExecutionInput;
+    ledger.close();
+    expect(payload).not.toHaveProperty('requiredSkills');
+    expect(HostOfferPlainPayloadSchema.safeParse(payload).success).toBe(true);
+  }
+});
 async function open(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   fixture ??= await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
   clock ||= Date.now();
@@ -131,7 +154,7 @@ it('offers a fresh writer with agentMemory none, keeps the Host out of its inten
   expect(execution).toEqual({ deviceId: fixture!.deviceId });
   expect(payload).toMatchObject({ agentMemory: 'none', session: { mode: 'fresh' }, agentRef: { agentId: 'main' }, terminalProjection: { mode: 'none' },
     limits: { maxDurationMs: DEFAULT_DREAM_MAX_DURATION_MS }, nativeSessions: { fromMs, toMs: clock, ifAdvertised: true } });
-  for (const field of ['agentMemoryCommit', 'homeAccess', 'messageEgress', 'requiredToolsets', 'preparation']) expect(payload).not.toHaveProperty(field);
+  for (const field of ['agentMemoryCommit', 'homeAccess', 'messageEgress', 'requiredToolsets', 'requiredSkills', 'preparation']) expect(payload).not.toHaveProperty(field);
   expect(bot!.ledger.snapshot().intents[intent.id]!.execution.payload.nativeSessions).toEqual(payload.nativeSessions);
   expect(payload.instruction).toContain('The release moved to Friday');
   await expect(bot!.cancelHostIntent(key)).rejects.toMatchObject({ code: 'unknown_intent' });
