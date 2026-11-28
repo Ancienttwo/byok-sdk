@@ -293,7 +293,7 @@ pub(crate) fn subscribe_quitting(sys: &System, cx: CallCx<'_>, listener: Callbac
     )
 }
 
-fn packaged_host_candidates(exe_dir: &Path) -> [PathBuf; 2] {
+pub(crate) fn packaged_host_candidates(exe_dir: &Path) -> [PathBuf; 2] {
     let bin = if cfg!(windows) { "host.exe" } else { "host" };
     [
         exe_dir.join("resources").join("host").join(bin),
@@ -419,7 +419,11 @@ fn create_shell_with_spec(
 }
 
 pub(crate) fn ensure_started(app_version: Option<String>) -> Result<JsonValue, JsError> {
-    let version = app_version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+    let version = nsh_core::element::app_info()
+        .filter(|info| !info.development)
+        .and_then(|info| info.version)
+        .or(app_version)
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
     let mut slot = shell_slot().lock().expect("runtime shell lock poisoned");
     if let Some(existing) = slot.as_ref() {
         let current = existing
@@ -451,6 +455,7 @@ pub(crate) fn restart_shell_sync(shell: &RuntimeShell) -> Result<(), JsError> {
 }
 
 pub(crate) async fn restart_supervisor() -> Result<(), JsError> {
+    crate::updater::check_host_restart()?;
     let shell = active_shell().ok_or_else(|| {
         JsError::Error("Host supervisor is not started".to_owned()).with_code("host_exited")
     })?;
