@@ -1,3 +1,5 @@
+import { formatNumber, t } from "../../i18n.ts";
+import { errorText } from "../../statusCopy.ts";
 import { Text, View } from "nsh";
 import type { ActivityCard } from "../../../../src/host/activity/cards.ts";
 import { approvalDecision, cardExpanded, decideApproval, setCardExpanded } from "../../store.ts";
@@ -7,17 +9,17 @@ type Timeline = NonNullable<ActivityCard["timeline"]>;
 type TimelineItem = Timeline["items"][number];
 type ApprovalItem = NonNullable<ActivityCard["approvals"]>["items"][number];
 
-const APPROVAL_STATUS: Readonly<Record<ApprovalItem["status"], { variant: BadgeVariant; symbol: string; label: string }>> = {
-  pending: { variant: "warning", symbol: "◐", label: "Pending" },
-  approved: { variant: "success", symbol: "✓", label: "Approved" },
-  rejected: { variant: "danger", symbol: "✕", label: "Rejected" },
+const APPROVAL_STATUS: Readonly<Record<ApprovalItem["status"], { variant: BadgeVariant; symbol: string }>> = {
+  pending: { variant: "warning", symbol: "◐" },
+  approved: { variant: "success", symbol: "✓" },
+  rejected: { variant: "danger", symbol: "✕" },
 };
 
 function summaryLine({ summary }: ActivityCard): string {
-  const parts = [`${summary.tools} tool${summary.tools === 1 ? "" : "s"}`];
-  if (summary.activeTool !== undefined) parts.push(`running ${summary.activeTool}`);
-  if (summary.failures > 0) parts.push(`${summary.failures} failed`);
-  if (summary.pendingApprovals > 0) parts.push(`${summary.pendingApprovals} waiting for you`);
+  const parts = [t("activity.tools", { count: formatNumber(summary.tools) })];
+  if (summary.activeTool !== undefined) parts.push(t("activity.running", { tool: summary.activeTool }));
+  if (summary.failures > 0) parts.push(t("activity.failures", { count: formatNumber(summary.failures) }));
+  if (summary.pendingApprovals > 0) parts.push(t("activity.pending", { count: formatNumber(summary.pendingApprovals) }));
   return parts.join(" · ");
 }
 
@@ -26,17 +28,17 @@ function itemText(item: TimelineItem): string {
     case "text-activity":
       return item.fragments.map((fragment) => fragment.text).join("");
     case "tool":
-      return `${item.tool}: ${item.state}`;
+      return t("activity.tool", { tool: item.tool, status: t(`activity.tool.${item.state}`) });
     case "artifact":
-      return `Artifact ${item.name} (${item.contentType})`;
+      return t("activity.artifact", { name: item.name, type: item.contentType });
     case "usage":
-      return `Usage: ${item.totalTokens ?? "?"} tokens`;
+      return t("activity.usage", { count: item.totalTokens === undefined ? "?" : formatNumber(item.totalTokens) });
     case "error":
-      return `Error: ${item.message}`;
+      return t("activity.error");
     case "boundary":
       return "—";
     case "unknown":
-      return `Unrecognized event ${item.eventType}`;
+      return t("activity.unknownEvent", { type: item.eventType });
   }
 }
 
@@ -54,12 +56,12 @@ export function approvalConfirmOptions(
   title: string,
   taskId: string,
 ): Parameters<typeof confirmAlert>[0] {
-  const label = kind === "approve" ? "Approve" : "Reject";
+  const label = kind === "approve" ? t("activity.approve") : t("activity.reject");
   return {
-    title: `${label} this request?`,
-    description: `${title} (task ${taskId}). The decision cannot be undone.`,
+    title: t(kind === "approve" ? "activity.confirmApprove" : "activity.confirmReject"),
+    description: t("activity.confirmDetail", { title, task: taskId }),
     actions: [
-      { label: "Cancel", role: "cancel", id: "cancel" },
+      { label: t("common.cancel"), role: "cancel", id: "cancel" },
       { label, role: "destructive", id: kind },
     ],
     closeOnEscape: true,
@@ -72,7 +74,7 @@ export function approvalConfirmOptions(
  */
 function ApprovalRow(props: { taskId: string; item: () => ApprovalItem }) {
   const testID = () => `activity-approval-${props.taskId}-${props.item().firstRevision}`;
-  const title = () => props.item().summary ?? "Approval request";
+  const title = () => props.item().summary ?? t("activity.approvalRequest");
   const status = () => APPROVAL_STATUS[props.item().status];
   const decision = () => {
     const approvalId = props.item().approvalId;
@@ -93,9 +95,9 @@ function ApprovalRow(props: { taskId: string; item: () => ApprovalItem }) {
     <View testID={testID()} class="gap-1.5">
       <View class="flex-row flex-wrap items-center gap-2">
         <Text class="text-sm text-foreground">{title()}</Text>
-        <Badge testID={`${testID()}-status`} variant={status().variant} symbol={status().symbol} label={status().label} />
+        <Badge testID={`${testID()}-status`} variant={status().variant} symbol={status().symbol} label={t(`activity.status.${props.item().status}`)} />
         <If when={props.item().resolvedBy}>
-          {(by) => <Text class="text-xs text-muted-foreground">{`(by ${by()})`}</Text>}
+          {(by) => <Text class="text-xs text-muted-foreground">{t("activity.resolvedBy", { name: by() })}</Text>}
         </If>
       </View>
       <If when={props.item().status === "pending"}>
@@ -104,7 +106,7 @@ function ApprovalRow(props: { taskId: string; item: () => ApprovalItem }) {
           else={
             <View testID={`${testID()}-no-id`} role="alert">
               <Text class="text-xs text-destructive">
-                This request has no approval id and cannot be answered here.
+                {t("activity.noApprovalId")}
               </Text>
             </View>
           }
@@ -113,23 +115,23 @@ function ApprovalRow(props: { taskId: string; item: () => ApprovalItem }) {
             <Button
               testID={`${testID()}-approve`}
               size="sm"
-              accessibilityHint="Asks to confirm, then approves this request"
+              accessibilityHint={t("activity.approveHint")}
               loading={running() === "approve"}
               disabled={running() !== null}
               onPress={() => void decide("approve")}
             >
-              Approve
+              {t("activity.approve")}
             </Button>
             <Button
               testID={`${testID()}-reject`}
               variant="outline"
               size="sm"
-              accessibilityHint="Asks to confirm, then rejects this request"
+              accessibilityHint={t("activity.rejectHint")}
               loading={running() === "reject"}
               disabled={running() !== null}
               onPress={() => void decide("reject")}
             >
-              Reject
+              {t("activity.reject")}
             </Button>
           </View>
         </If>
@@ -137,7 +139,7 @@ function ApprovalRow(props: { taskId: string; item: () => ApprovalItem }) {
       <If when={decision()?.error}>
         {(error) => (
           <View testID={`${testID()}-error`} role="alert">
-            <Text class="text-xs text-destructive">{error()}</Text>
+            <Text class="text-xs text-destructive">{errorText(error())}</Text>
           </View>
         )}
       </If>
@@ -165,11 +167,11 @@ export function ActivityCardView(props: { card: () => ActivityCard }) {
         >
           <If
             when={props.card().timeline}
-            else={<Text class="text-xs text-muted-foreground">No activity retained for this task.</Text>}
+            else={<Text class="text-xs text-muted-foreground">{t("activity.noTimeline")}</Text>}
           >
             {(timeline) => (
               <View class="gap-1.5">
-                <View role="list" accessibilityLabel={`Timeline of task ${taskId()}`} class="gap-1" selectable>
+                <View role="list" accessibilityLabel={t("activity.timeline", { task: taskId() })} class="gap-1" selectable>
                   <Each of={timeline().items} key={itemKey}>
                     {(item) => (
                       <Text testID={`activity-item-${taskId()}-${item().kind}`} class="text-xs text-foreground">
@@ -180,7 +182,7 @@ export function ActivityCardView(props: { card: () => ActivityCard }) {
                 </View>
                 <If when={lostEvents(timeline()) > 0}>
                   <Text class="text-xs text-muted-foreground">
-                    {`${lostEvents(timeline())} earlier events are no longer retained.`}
+                    {t("activity.lostEvents", { count: formatNumber(lostEvents(timeline())) })}
                   </Text>
                 </If>
               </View>

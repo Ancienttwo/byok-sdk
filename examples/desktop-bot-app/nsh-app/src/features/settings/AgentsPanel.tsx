@@ -1,18 +1,19 @@
+import { t } from "../../i18n.ts";
 import { Text, View } from "nsh";
 import type { RuntimeView } from "../../../../src/host/settings/types.ts";
 import { Badge, Empty, Separator, Surface } from "../../ui/index.ts";
-import { runtimeDisplayName, runtimeSignInGuidance, runtimeStatus } from "./runtimeStatus.ts";
+import { runtimeDisplayName, runtimeOutcomeText, runtimeSignInGuidance, runtimeStatus } from "./runtimeStatus.ts";
 
 function authStateText(authPresent: boolean | undefined): string {
-  if (authPresent === true) return "signed in";
-  if (authPresent === false) return "signed out";
-  return "not checked";
+  if (authPresent === true) return t("runtime.signed-in");
+  if (authPresent === false) return t("runtime.signed-out");
+  return t("runtime.not-checked");
 }
 
 function AgentFact(props: { label: string; value: string; testID?: string; mono?: boolean; selectable?: boolean }) {
   return (
-    <View testID={props.testID} class="flex-row gap-3" accessible accessibilityLabel={`${props.label}: ${props.value}`}>
-      <Text class="w-32 shrink-0 text-xs text-muted-foreground">{props.label}</Text>
+    <View testID={props.testID} class="flex-row gap-3" accessible accessibilityLabel={t("common.fact", { label: props.label, value: props.value })}>
+      <Text class="basis-1/3 min-w-0 text-xs text-muted-foreground">{props.label}</Text>
       <If
         when={props.selectable}
         else={
@@ -49,16 +50,23 @@ function AgentRow(props: { runtime: () => RuntimeView }) {
   const outcomeDetail = () => {
     const rt = props.runtime();
     if (rt.outcome === "timeout") {
-      return "Check timed out before sign-in could be verified. Press Check again to retry.";
+      return t("runtime.signInTimedOut");
     }
     if (rt.outcome !== "available") {
-      return rt.reason === undefined ? rt.outcome : `${rt.outcome}: ${rt.reason}`;
+      return runtimeOutcomeText(rt);
     }
     return null;
   };
   const executableLabel = () => {
     const source = props.runtime().executableSource;
-    return source === undefined ? "Executable" : `Executable (${source})`;
+    return source === undefined ? t("runtime.executable") : t("runtime.executableSource", { source: t("runtime.source." + source) });
+  };
+
+  const upgradeText = (upgrade: NonNullable<RuntimeView["upgrade"]>) => {
+    const key = upgrade.state === "required" ? "runtime.upgradeRequired" : "runtime.upgradeAvailable";
+    return upgrade.minimumVersion === undefined
+      ? t(key, { qualified: upgrade.qualifiedVersion })
+      : t(key + "Minimum", { qualified: upgrade.qualifiedVersion, minimum: upgrade.minimumVersion });
   };
 
   return (
@@ -81,7 +89,7 @@ function AgentRow(props: { runtime: () => RuntimeView }) {
       <View class="gap-1">
         <If when={props.runtime().outcome === "available"}>
           <AgentFact
-            label="Sign-in"
+            label={t("runtime.signIn")}
             value={authStateText(props.runtime().authPresent)}
             testID={`settings-agent-${props.runtime().id}-auth`}
           />
@@ -97,8 +105,8 @@ function AgentRow(props: { runtime: () => RuntimeView }) {
 
         <If when={props.runtime().present || props.runtime().version !== undefined}>
           <AgentFact
-            label="Version"
-            value={props.runtime().version ?? "not checked"}
+            label={t("runtime.version")}
+            value={props.runtime().version ?? t("runtime.not-checked")}
             testID={`settings-agent-${props.runtime().id}-version`}
           />
         </If>
@@ -106,14 +114,14 @@ function AgentRow(props: { runtime: () => RuntimeView }) {
         <If when={props.runtime().verdict === "warn" ? props.runtime().qualifiedVersion : undefined}>
           {(qualified) => (
             <Text testID={`settings-agent-${props.runtime().id}-qualified`} class="text-xs text-warning">
-              {`Untested version — qualified against ${qualified()}`}
+              {t("runtime.qualified", { version: qualified() })}
             </Text>
           )}
         </If>
 
         <If when={props.runtime().verdict === "block"}>
           <Text testID={`settings-agent-${props.runtime().id}-blocked`} class="text-xs text-destructive">
-            Blocked by the Host version policy.
+            {t("runtime.blocked")}
           </Text>
         </If>
 
@@ -121,7 +129,7 @@ function AgentRow(props: { runtime: () => RuntimeView }) {
           {(upgrade) => (
             <View testID={`settings-agent-${props.runtime().id}-upgrade`} class="gap-1 pt-0.5">
               <Text class="text-xs text-muted-foreground">
-                {`${upgrade().state === "required" ? "Upgrade required" : "Upgrade available"}: qualified ${upgrade().qualifiedVersion}${upgrade().minimumVersion === undefined ? "" : ` (minimum ${upgrade().minimumVersion})`}`}
+                {upgradeText(upgrade())}
               </Text>
               <Surface tone="muted" class="px-2.5 py-1.5 rounded-md">
                 <View selectable>
@@ -184,12 +192,12 @@ export function AgentsPanel(props: { runtimes: readonly RuntimeView[] }) {
         when={props.runtimes.length > 0}
         else={
           <Empty
-            title="No runtimes configured"
-            description="The Host did not report any runtime adapters."
+            title={t("runtime.empty")}
+            description={t("runtime.emptyDetail")}
           />
         }
       >
-        <View role="list" accessibilityLabel="Agents" class="gap-1">
+        <View role="list" accessibilityLabel={t("settings.agents")} class="gap-1">
           <Each of={props.runtimes} key={(runtime) => runtime.id}>
             {(runtime, index) => (
               <View class="gap-1">

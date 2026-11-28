@@ -1,3 +1,4 @@
+import { rolePreset } from '../../../brand.config.ts';
 import type { BotState, BotView } from '../../host/conversation/view.ts';
 import type { RolePreset } from '../../host/conversation/catalog.ts';
 
@@ -26,7 +27,7 @@ export function BotRail(props: {
       <details className="conv-new">
         <summary>New by role</summary>
         {props.roles.map(role => (
-          <button key={role.id} type="button" onClick={() => props.onNew(role)}>{role.label}</button>
+          <button key={role.id} type="button" onClick={() => props.onNew(role)}>{rolePreset(role.id, 'en').label}</button>
         ))}
       </details>
     </aside>

@@ -1,3 +1,4 @@
+import { t } from "../../i18n.ts";
 import { signal, Text, View } from "nsh";
 import { cancelTurn, clearContext, sendMessage } from "../../store.ts";
 import { Button, Textarea } from "../../ui/index.ts";
@@ -44,12 +45,12 @@ export function Composer(props: ComposerProps) {
     }
   };
   const placeholder = () =>
-    props.archived ? "This Bot is archived" : props.hostRunning ? "Message" : "The Host is not running";
+    props.archived ? t("conversation.archivedPlaceholder") : props.hostRunning ? t("conversation.message") : t("conversation.hostOffline");
   return (
     <View class="gap-2">
       <Textarea
         testID="conv-composer-input"
-        accessibilityLabel="Message"
+        accessibilityLabel={t("conversation.message")}
         placeholder={placeholder()}
         value={text()}
         disabled={disabled()}
@@ -62,15 +63,15 @@ export function Composer(props: ComposerProps) {
           <Text class="text-xs text-destructive">{command.error()}</Text>
         </View>
       </If>
-      <View class="flex-row items-center gap-2">
+      <View class="flex-row flex-wrap items-center gap-2">
         <Button
           testID="conv-send"
           loading={command.busy()}
           disabled={disabled() || text() === ""}
-          accessibilityHint="Enter sends; Shift+Enter starts a new line"
+          accessibilityHint={t("conversation.sendHint")}
           onPress={trySend}
         >
-          Send
+          {t("conversation.send")}
         </Button>
         <Button
           testID="conv-cancel-turn"
@@ -81,7 +82,7 @@ export function Composer(props: ComposerProps) {
             void command.run(() => cancelTurn(turnId));
           }}
         >
-          Cancel Turn
+          {t("conversation.cancelTurn")}
         </Button>
         <Button
           testID="conv-clear"
@@ -89,7 +90,7 @@ export function Composer(props: ComposerProps) {
           disabled={command.busy() || disabled()}
           onPress={() => void command.run(() => clearContext(props.botId))}
         >
-          Clear context
+          {t("conversation.clear")}
         </Button>
       </View>
     </View>

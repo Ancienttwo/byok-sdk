@@ -1,3 +1,5 @@
+import { formatNumber, t } from "../../i18n.ts";
+import { errorText } from "../../statusCopy.ts";
 import { cleanup, signal, Text, untracked, View } from "nsh";
 import type { ModelChoice } from "../../../../src/host/conversation/catalog.ts";
 import type { DreamingSetting, HostSettings } from "../../../../src/host/settings/types.ts";
@@ -50,7 +52,7 @@ export function DreamingForm(props: {
       }
     } catch (error) {
       if (mounted) {
-        saveError.set(toBridgeCallError(error).message);
+        saveError.set(toBridgeCallError(error).code);
       }
     } finally {
       if (mounted) {
@@ -63,17 +65,17 @@ export function DreamingForm(props: {
     <View testID="settings-dreaming-form" class="gap-3">
       <Switch
         testID="settings-dreaming-switch"
-        label="Dreaming on"
+        label={t("dreaming.enabled")}
         checked={draft().enabled}
         onChange={(enabled) => draft.update((current) => ({ ...current, enabled }))}
       />
-      <View role="group" accessibilityLabel="Models, preferred first" class="gap-1.5">
-        <Text class="text-xs font-medium text-muted-foreground">Models, preferred first</Text>
+      <View role="group" accessibilityLabel={t("dreaming.preferredModels")} class="gap-1.5">
+        <Text class="text-xs font-medium text-muted-foreground">{t("dreaming.preferredModels")}</Text>
         <Each of={props.models} key={(model) => model.id}>
           {(model) => (
             <Checkbox
               testID={`settings-dreaming-model-${model().id}`}
-              label={rank(model().id) > 0 ? `${model().label} (#${rank(model().id)})` : model().label}
+              label={rank(model().id) > 0 ? t("dreaming.rankedModel", { model: model().label, rank: formatNumber(rank(model().id)) }) : model().label}
               checked={rank(model().id) > 0}
               onChange={() => toggle(model().id)}
             />
@@ -83,7 +85,7 @@ export function DreamingForm(props: {
           {(id) => (
             <Checkbox
               testID={`settings-dreaming-model-${id()}`}
-              label={`${id()} (#${rank(id())}, no longer in the catalog)`}
+              label={t("dreaming.departedModel", { model: id(), rank: formatNumber(rank(id())) })}
               checked
               onChange={() => toggle(id())}
             />
@@ -98,18 +100,18 @@ export function DreamingForm(props: {
           disabled={props.reading}
           onPress={() => void save()}
         >
-          Save dreaming
+          {t("dreaming.save")}
         </Button>
       </View>
       <If when={saved()}>
         <View testID="settings-dreaming-result" role="region" accessibilityLiveRegion="polite">
-          <Text class="text-xs text-muted-foreground">Saved. Applies when the Host next starts.</Text>
+          <Text class="text-xs text-muted-foreground">{t("dreaming.saved")}</Text>
         </View>
       </If>
       <If when={saveError()}>
         {(message) => (
           <View testID="settings-dreaming-error" role="alert">
-            <Text class="text-xs text-destructive">{`Save failed: ${message()}`}</Text>
+            <Text class="text-xs text-destructive">{t("dreaming.saveError", { error: errorText(message()) })}</Text>
           </View>
         )}
       </If>

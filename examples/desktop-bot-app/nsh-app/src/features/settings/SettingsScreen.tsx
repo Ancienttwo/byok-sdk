@@ -1,5 +1,6 @@
+import { t } from "../../i18n.ts";
 import { computed, resource, signal, Text, View } from "nsh";
-import { toBridgeCallError } from "../../bridge.ts";
+import { bridgeErrorText } from "../../statusCopy.ts";
 import {
   dreamingSaveSettled,
   dreamingSaving,
@@ -16,18 +17,19 @@ import { DiagnosticsExportButton } from "../shell/RecoveryPanel.tsx";
 import { AgentsPanel } from "./AgentsPanel.tsx";
 import { DevicePanel } from "./DevicePanel.tsx";
 import { DreamingForm } from "./DreamingForm.tsx";
+import { LanguageSetting } from "./LanguageSetting.tsx";
 
-const failureText = (error: unknown) => (error === undefined ? null : toBridgeCallError(error).message);
+const failureText = (error: unknown) => (error === undefined ? null : bridgeErrorText(error));
 
 /**
  * Device, runtimes, clock skew and doctor, then dreaming, login item and diagnostics export. The section reads
  * `settings.device` and `settings.get` when it shows and on Refresh, never on a Host hint; the resources keep only the
  * latest read and drop it when the section unmounts. The dreaming models come from the store's shared `k8View`.
  */
-export function SettingsScreen() {
+export function SettingsScreen(props: { languageLoadFailed?: boolean }) {
   const refreshes = signal(0);
   const deviceReads = signal(0);
-  // Consumed once by the read triggered by "Check again", so a Host restart while mounted gets the default read.
+  // Consumed once by the read triggered by t("common.checkAgain"), so a Host restart while mounted gets the default read.
   let pendingCheckAuth = false;
   const activeCheckAuth = signal(false);
   const ready = computed(() => hostReady());
@@ -61,9 +63,10 @@ export function SettingsScreen() {
 
   return (
     <View testID="settings-section" class="gap-6">
+      <LanguageSetting loadFailed={props.languageLoadFailed ?? false} />
       <View class="flex-row items-center gap-3">
         <Text class="flex-1 text-xs text-muted-foreground">
-          {ready() ? "Device status and settings as the Host reports them." : "Settings load once the Host runs."}
+          {ready() ? t("settings.ready") : t("settings.wait")}
         </Text>
         <Button
           testID="settings-refresh"
@@ -77,7 +80,7 @@ export function SettingsScreen() {
             deviceReads.update((n) => n + 1);
           }}
         >
-          Refresh
+          {t("common.refresh")}
         </Button>
       </View>
 
@@ -85,8 +88,8 @@ export function SettingsScreen() {
         <CardHeader>
           <View class="flex-row items-center gap-3">
             <View class="flex-1 min-w-0 gap-1">
-              <CardTitle>Agents</CardTitle>
-              <CardDescription>Detected local agent runtimes, version policy, and sign-in state.</CardDescription>
+              <CardTitle>{t("settings.agents")}</CardTitle>
+              <CardDescription>{t("settings.agentsDescription")}</CardDescription>
             </View>
             <Button
               testID="settings-agents-check-again"
@@ -100,7 +103,7 @@ export function SettingsScreen() {
                 deviceReads.update((n) => n + 1);
               }}
             >
-              Check again
+              {t("common.checkAgain")}
             </Button>
           </View>
         </CardHeader>
@@ -108,7 +111,7 @@ export function SettingsScreen() {
           <If when={deviceFailure()}>
             {(message) => (
               <View testID="settings-agents-error" role="alert">
-                <Text class="text-xs text-destructive">{`Agents unavailable: ${message()}`}</Text>
+                <Text class="text-xs text-destructive">{t("settings.agentsError", { error: message() })}</Text>
               </View>
             )}
           </If>
@@ -116,21 +119,21 @@ export function SettingsScreen() {
             {(view) => <AgentsPanel runtimes={view().runtimes} />}
           </If>
           <If when={ready() && device() === undefined && deviceFailure() === null}>
-            <Spinner label="Checking agents…" />
+            <Spinner label={t("settings.agentsLoading")} />
           </If>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Device</CardTitle>
-          <CardDescription>The daemon's status, its runtimes and the SDK doctor.</CardDescription>
+          <CardTitle>{t("settings.device")}</CardTitle>
+          <CardDescription>{t("settings.deviceDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <If when={deviceFailure()}>
             {(message) => (
               <View testID="settings-device-error" role="alert">
-                <Text class="text-xs text-destructive">{`Device unavailable: ${message()}`}</Text>
+                <Text class="text-xs text-destructive">{t("settings.deviceError", { error: message() })}</Text>
               </View>
             )}
           </If>
@@ -138,28 +141,28 @@ export function SettingsScreen() {
             {(view) => <DevicePanel device={view()} />}
           </If>
           <If when={ready() && device() === undefined && deviceFailure() === null}>
-            <Spinner label="Checking device status…" />
+            <Spinner label={t("settings.deviceLoading")} />
           </If>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Dreaming</CardTitle>
-          <CardDescription>Applies when the Host next starts.</CardDescription>
+          <CardTitle>{t("settings.dreaming")}</CardTitle>
+          <CardDescription>{t("settings.dreamingDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <If when={settingsFailure()}>
             {(message) => (
               <View testID="settings-dreaming-load-error" role="alert">
-                <Text class="text-xs text-destructive">{`Settings unavailable: ${message()}`}</Text>
+                <Text class="text-xs text-destructive">{t("settings.settingsError", { error: message() })}</Text>
               </View>
             )}
           </If>
           <If when={modelsFailure()}>
             {(message) => (
               <View testID="settings-models-error" role="alert">
-                <Text class="text-xs text-destructive">{`Models unavailable: ${message()}`}</Text>
+                <Text class="text-xs text-destructive">{t("settings.modelsError", { error: message() })}</Text>
               </View>
             )}
           </If>
@@ -187,9 +190,9 @@ export function SettingsScreen() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Startup &amp; System</CardTitle>
+          <CardTitle>{t("settings.startup")}</CardTitle>
           <CardDescription>
-            OS-authoritative login-item preference synced directly with desktop services.
+            {t("settings.startupDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -199,14 +202,14 @@ export function SettingsScreen() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Diagnostics</CardTitle>
-          <CardDescription>Export a redacted snapshot of supervised Host logs and S1 store state.</CardDescription>
+          <CardTitle>{t("settings.diagnostics")}</CardTitle>
+          <CardDescription>{t("settings.diagnosticsDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <DiagnosticsExportButton testID="settings-diagnostics-btn" disabled={isQuitting() || !ready()} />
           <If when={!ready()}>
             <Text testID="settings-diagnostics-note" class="text-xs text-muted-foreground">
-              Start or restart the Host to export diagnostics.
+              {t("settings.diagnosticsOffline")}
             </Text>
           </If>
         </CardContent>

@@ -1,5 +1,6 @@
+import { t } from "../../i18n.ts";
 import { List, Text, View } from "nsh";
-import { toBridgeCallError } from "../../bridge.ts";
+import { bridgeErrorText } from "../../statusCopy.ts";
 import { activityCards, hostReady, reloadActivityCards } from "../../store.ts";
 import { Button, Empty, Spinner } from "../../ui/index.ts";
 import { ActivityCardView } from "./ActivityCardView.tsx";
@@ -11,7 +12,7 @@ import { ActivityCardView } from "./ActivityCardView.tsx";
 export function ActivityScreen() {
   const failure = () => {
     const error = activityCards.error();
-    return error === undefined ? null : toBridgeCallError(error).message;
+    return error === undefined ? null : bridgeErrorText(error);
   };
   return (
     <View testID="activity-section" class="gap-4">
@@ -24,7 +25,7 @@ export function ActivityScreen() {
               <View class="flex-row items-center gap-2" accessibilityState={{ busy: true }}>
                 <Spinner />
                 <Text class="text-sm text-muted-foreground">
-                  {hostReady() ? "Loading activity…" : "Activity loads once the Host runs."}
+                  {hostReady() ? t("activity.loading") : t("activity.offline")}
                 </Text>
               </View>
             }
@@ -33,13 +34,13 @@ export function ActivityScreen() {
               <List
                 testID="activity-list"
                 role="list"
-                accessibilityLabel="Activity"
+                accessibilityLabel={t("section.activity")}
                 viewport="parent"
                 contentClass="gap-3"
                 each={cards()}
                 keyExtractor={(card) => card.taskId}
                 estimatedItemSize={120}
-                empty={<Empty title="No tasks since the Host started." />}
+                empty={<Empty title={t("activity.empty")} />}
               >
                 {(card) => (
                   // A List cell outlives its card: scrolling and reloads reuse it for another task. Mounting per taskId
@@ -55,7 +56,7 @@ export function ActivityScreen() {
       >
         {(message) => (
           <View role="alert" testID="activity-error" class="flex-row items-center gap-3">
-            <Text class="text-sm text-destructive flex-1">{`Activity unavailable: ${message()}`}</Text>
+            <Text class="text-sm text-destructive flex-1">{t("activity.unavailable", { error: message() })}</Text>
             <Button
               testID="activity-retry"
               variant="outline"
@@ -63,7 +64,7 @@ export function ActivityScreen() {
               loading={activityCards.loading()}
               onPress={reloadActivityCards}
             >
-              Retry
+              {t("common.retry")}
             </Button>
           </View>
         )}

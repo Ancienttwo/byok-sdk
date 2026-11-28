@@ -183,3 +183,11 @@ Written before `src/features/activity/` and `src/features/settings/` implementat
 | Dreaming save | `Button loading` while `settings.setDreaming` runs; Refresh shows `Button loading` and stays disabled until the save settles, also after a section switch remounts Settings (its read waits for the save); Save in turn disables while a settings read runs; the result shows in a polite live region, a failure as `role="alert"` text | Spinner stops under `motion-reduce:`; result text appears at once |
 | Diagnostics export while the Host is not running | The button disables and a muted note explains why, in flow without layout shift | Identical |
 | Drag / swipe / throw | None in these workspaces | N/A |
+
+## 11. Language
+
+Settings › General uses the shared Select. The current choice remains selected as the renderer updates in place,
+with the native Select focus and keyboard behavior. The change has no added motion. Language names use their own
+scripts so the setting remains usable in every locale. Status rows retain glyphs and use translated labels. The
+sidebar and fact columns size proportionally, and action rows can wrap. Windows Inputs and Textareas retain
+`font-cjk` for every selected language.

@@ -241,7 +241,8 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
 
     await app.waitFor("id:shell-recovery-panel");
     expect(app.shows("text:The Host stopped")).toBe(true);
-    expect(app.shows("text:Store schema is newer than this binary")).toBe(true);
+    expect(app.shows("text:The Host could not open its data store.")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("Store schema is newer than this binary");
     await app.waitFor("id:recovery-restore-btn");
     expect(app.shows("text:Restore data of version 0.45.0")).toBe(true);
     expect(app.shows("id:recovery-start-fresh-btn")).toBe(true);
@@ -264,7 +265,8 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     await app.press("id:recovery-restore-confirm");
     await app.waitFor("id:recovery-error");
     expect(app.texts().join("\n")).toContain("Restore failed:");
-    expect(app.texts().join("\n")).toContain("Snapshot directory locked");
+    expect(app.shows("text:Restore failed: The operation failed.")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("Snapshot directory locked");
     expect(app.enabled("id:recovery-start-fresh-btn")).toBe(true);
 
     // Start fresh confirms and calls shell.startFresh.
@@ -293,7 +295,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     expect(app.enabled("id:recovery-export-diagnostics")).toBe(true);
     // The adapter's quit hook hears the request and announces the drain (`ByokShell.onQuitting`).
     await app.quitRequest();
-    await app.waitFor("text:Platform: macos • Hints: 0 • Quitting: yes");
+    await app.waitFor("text:Platform: macos • Hints: 0 • Quitting: Yes");
     expect(app.enabled("id:recovery-export-diagnostics")).toBe(false);
   });
 
@@ -355,7 +357,8 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     rejectRestore(new Error("Restore snapshot corrupt"));
     await confirming;
     await app.waitFor("id:recovery-error");
-    expect(app.texts().join("\n")).toContain("Restore snapshot corrupt");
+    expect(app.shows("text:Restore failed: The operation failed.")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("Restore snapshot corrupt");
     expect(app.enabled("id:sidebar-restart-host")).toBe(true);
     expect(restartCalls).toBe(0);
   });
@@ -387,7 +390,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
 
     await app.waitFor("id:shell-failed-panel");
     expect(app.shows("text:The Host failed")).toBe(true);
-    expect(app.shows("text:Host exited with status 42")).toBe(true);
+    expect(app.shows("text:Host exited with status 42")).toBe(false);
     expect(app.shows("id:sidebar-restart-host")).toBe(true);
     expect(calls.includes("shell.state")).toBe(false);
     // The exited Host cannot export diagnostics; the card points to Restart Host instead.
@@ -473,28 +476,28 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
 
   test("trayStatusLabel, describeHostState, buildTrayMenuItems, and buildApplicationMenuItems map all Host states", () => {
     expect(trayStatusLabel(null, PENDING)).toBe("Host starting");
-    expect(trayStatusLabel(null, START_FAILED)).toBe("Host stopped: No packaged Host binary");
+    expect(trayStatusLabel(null, START_FAILED)).toBe("Host stopped: The Host is not running.");
     expect(trayStatusLabel({ state: "starting", pid: 7 }, STARTED)).toBe("Host starting");
     expect(trayStatusLabel({ state: "running", pid: 7, activeWork: 2 }, STARTED)).toBe("Active tasks: 2");
     expect(trayStatusLabel({ state: "restarting", inMs: 1200, reason: "crash" }, STARTED)).toBe(
-      "Host restarting: crash",
+      "Host restarting in 2 s",
     );
     expect(trayStatusLabel({ state: "stopped", pid: 7, reason: "schema mismatch", storeRefused: true }, STARTED)).toBe(
-      "Host stopped: schema mismatch",
+      "Host stopped",
     );
-    expect(trayStatusLabel({ state: "failed", reason: "exit 1" }, STARTED)).toBe("Host failed: exit 1");
+    expect(trayStatusLabel({ state: "failed", reason: "exit 1" }, STARTED)).toBe("Host failed");
 
     expect(describeHostState(null, PENDING)).toBe("Host starting");
-    expect(describeHostState(null, START_FAILED)).toBe("Host stopped: No packaged Host binary");
+    expect(describeHostState(null, START_FAILED)).toBe("Host stopped: The Host is not running.");
     expect(describeHostState({ state: "starting", pid: 7 }, STARTED)).toBe("Host starting");
     expect(describeHostState({ state: "running", pid: 7, activeWork: 0 }, STARTED)).toBe("Host running");
     expect(describeHostState({ state: "restarting", inMs: 1200, reason: "oops" }, STARTED)).toBe(
-      "Host restarting in 2 s: oops",
+      "Host restarting in 2 s",
     );
     expect(describeHostState({ state: "stopped", pid: 7, reason: "halted", storeRefused: false }, STARTED)).toBe(
-      "Host stopped: halted",
+      "Host stopped",
     );
-    expect(describeHostState({ state: "failed", reason: "boom" }, STARTED)).toBe("Host failed: boom");
+    expect(describeHostState({ state: "failed", reason: "boom" }, STARTED)).toBe("Host failed");
 
     let shown = 0;
     let restarted = 0;
@@ -517,7 +520,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     });
     expect(trayRunning.map((item) => ("type" in item ? item.type : item.label))).toEqual([
       "Show BYOK Bots",
-      "Active tasks: 2",
+      "● Active tasks: 2",
       "separator",
       "Restart Host",
       "separator",
@@ -559,7 +562,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
       onRestartHost: () => {},
       onQuit: () => {},
     });
-    expect((trayStartFailed[1] as { label?: string }).label).toBe("Host stopped: No packaged Host binary");
+    expect((trayStartFailed[1] as { label?: string }).label).toBe("■ Host stopped: The Host is not running.");
     expect((trayStartFailed[3] as { disabled?: boolean }).disabled).toBe(true);
 
     const trayQuitting = buildTrayMenuItems({

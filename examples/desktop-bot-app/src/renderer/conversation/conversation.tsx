@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { rolePreset } from '../../../brand.config.ts';
 import type { RolePreset } from '../../host/conversation/catalog.ts';
 import type { BotProfile } from '../../host/store/types.ts';
 import { Composer } from './composer.tsx';
@@ -22,9 +23,12 @@ export function ConversationSection() {
   );
   if (!snapshot) return failure;
   const bot = snapshot.bots.find(row => row.id === selected);
-  const startNew = (role: RolePreset) => setEditing({ creating: true, profile: {
-    id: crypto.randomUUID(), name: role.label, role: role.role, persona: role.persona, model: snapshot.models[0]?.id ?? '',
-  } });
+  const startNew = ({ id }: RolePreset) => {
+    const { label, role, persona } = rolePreset(id, 'en');
+    setEditing({ creating: true, profile: {
+      id: crypto.randomUUID(), name: label, role, persona, model: snapshot.models[0]?.id ?? '',
+    } });
+  };
   return (
     <div className="conv">
       <BotRail bots={snapshot.bots} roles={snapshot.roles} selected={selected} onSelect={setSelected} onNew={startNew} />

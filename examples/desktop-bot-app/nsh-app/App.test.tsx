@@ -69,7 +69,7 @@ describe("BYOK NSH Foundations Gallery", () => {
     expect(app.shows("text:Audit Confirmed")).toBe(true);
 
     await app.press("id:tab-tokens");
-    expect(app.shows("text:Selected tab: tokens • Runtime: pi")).toBe(true);
+    expect(app.shows("text:Selected tab: Tokens • Runtime: pi")).toBe(true);
 
     await app.press("id:open-dialog-btn");
     expect(app.shows("text:Foundations Dialog")).toBe(true);
@@ -209,7 +209,8 @@ describe("BYOK NSH Foundations Gallery", () => {
     await app.waitFor("id:keys-list-refusal");
     expect(calls).toEqual(["start"]);
     // The sidebar reads the same start refusal: no supervisor runs, so it never reports "Host starting".
-    expect(app.shows("text:Host stopped: No packaged Host binary")).toBe(true);
+    expect(app.shows("text:Host stopped: The operation failed.")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("No packaged Host binary");
     expect(app.shows("text:Host starting")).toBe(false);
 
     // A valid draft still cannot be saved: keys.submit would only refuse with host_exited.

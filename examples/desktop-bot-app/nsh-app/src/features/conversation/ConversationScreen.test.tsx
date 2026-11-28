@@ -5,7 +5,7 @@ import type { DeviceView, RuntimeView } from "../../../../src/host/settings/type
 
 type Call = { method: string; params: any };
 
-const ROLES = [{ id: "writer", label: "Writer", role: "Writes and edits text", persona: "Clear, short sentences." }];
+const ROLES = [{ id: "writer" }];
 const MODELS = [{ id: "zai-chat", label: "ZAI Chat", runtime: "pi", mcpToolsets: true, keyProfile: false }];
 
 function device(runtimes: readonly RuntimeView[]): DeviceView {
@@ -479,7 +479,7 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     const saved = calls.filter((call) => call.method === "k8.saveBot").map((call) => call.params);
     expect(saved.length).toBe(2);
     expect(saved[1]).toEqual(saved[0]);
-    expect(saved[0]).toMatchObject({ name: "Writer", role: "Writes and edits text", persona: "Clear, short sentences.", model: "zai-chat" });
+    expect(saved[0]).toMatchObject({ name: "Writer", role: "Writes and edits text", persona: "Clear, short sentences. Ask when the audience is unclear.", model: "zai-chat" });
     await app.waitUntil(() => views(calls).some((call) => call.params.botId === saved[0].id));
   });
 
@@ -522,18 +522,18 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     await app.press("id:conv-bot-a");
     await app.waitFor("text:New a");
     expect(app.shows("text:Old a")).toBe(false);
-    await app.press("text:Show 1 earlier messages");
+    await app.press("text:Show earlier messages (1)");
     await app.waitFor("text:Old a");
 
     await app.press("id:conv-bot-b");
     await app.waitFor("text:New b");
     expect(app.shows("text:Old b")).toBe(false);
-    expect(app.shows("text:Show 1 earlier messages")).toBe(true);
+    expect(app.shows("text:Show earlier messages (1)")).toBe(true);
 
     await app.press("id:conv-bot-a");
     await app.waitFor("text:New a");
     expect(app.shows("text:Old a")).toBe(true);
-    expect(app.shows("text:Hide 1 earlier messages")).toBe(true);
+    expect(app.shows("text:Hide earlier messages (1)")).toBe(true);
   });
 
   test("a Bot that leaves the snapshot drops its unfolded history", async () => {
@@ -556,7 +556,7 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
       }),
     );
     await app.press("id:conv-bot-a");
-    await app.press("text:Show 1 earlier messages");
+    await app.press("text:Show earlier messages (1)");
     await app.waitFor("text:Old a");
 
     dropA = true;
@@ -566,7 +566,7 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     await app.press("id:conv-bot-a");
     await app.waitFor("text:New a");
     expect(app.shows("text:Old a")).toBe(false);
-    expect(app.shows("text:Show 1 earlier messages")).toBe(true);
+    expect(app.shows("text:Show earlier messages (1)")).toBe(true);
   });
 
 
@@ -606,14 +606,14 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     await app.waitFor("id:conv-bot-a");
     expect(memories(calls)).toEqual([]);
     await app.press("id:conv-bot-a");
-    await app.waitFor("text:Memory: 100 B of 8 KiB · 2 notes");
+    await app.waitFor("text:Memory: 100 B of 8 KiB · Notes: 2");
     await app.press("id:conv-edit-profile");
     await app.press("id:conv-profile-tab-memory");
     await app.waitFor("id:conv-memory-resident");
-    for (const text of ["100 B of 8 KiB", "2 files · 30 B", "Unavailable"]) {
+    for (const text of ["100 B of 8 KiB", "Files: 2 · 30 B", "Unavailable"]) {
       expect(app.texts()).toContain(text);
     }
-    expect(app.texts().some((text) => text.startsWith("Succeeded · ") && text.endsWith(" · cheap"))).toBe(true);
+    expect(app.texts().some((text) => text.startsWith("✓ Succeeded · ") && text.endsWith(" · cheap"))).toBe(true);
     expect(app.shows("id:conv-memory-over-limit")).toBe(false);
     expect(memories(calls).every((call) => call.params.botId === "a")).toBe(true);
   });
@@ -657,7 +657,8 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     await app.press("id:conv-profile-tab-memory");
     await app.waitFor("id:conv-memory-error");
     expect(app.accessibility("id:conv-memory-error")?.role).toBe("alert");
-    expect(app.shows("text:Memory unavailable: Host busy")).toBe(true);
+    expect(app.shows("text:Memory unavailable: The operation failed.")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("Host busy");
 
     await app.press("id:conv-memory-retry");
     await app.waitFor("id:conv-memory-resident");
@@ -678,7 +679,7 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     await app.press("id:conv-profile-tab-memory");
     await app.waitFor("id:conv-memory-over-limit");
     expect(app.accessibility("id:conv-memory-over-limit")?.role).toBe("alert");
-    expect(app.shows("text:▲ MEMORY.md is over the 8 KiB limit (9000 bytes): tasks fail before they start until it is back within the limit.")).toBe(true);
+    expect(app.shows("text:▲ MEMORY.md is over the 8 KiB limit (9,000 B): tasks fail before they start until it is back within the limit.")).toBe(true);
   });
 
   test("Memory: values the Host cannot read show as unavailable, never 0", async () => {

@@ -1,3 +1,4 @@
+import { t } from "../../i18n.ts";
 import { signal, Text, View } from "nsh";
 import brand from "../../../../brand.config.ts";
 import {
@@ -13,21 +14,10 @@ import {
   setActiveSection,
   setAppearance,
   shellStart,
-  type WorkspaceSection,
 } from "../../store.ts";
 import { Button, HostStateBadge, ListItem, Separator, Tab, Tabs } from "../../ui/index.ts";
 
-interface NavItem {
-  readonly id: WorkspaceSection;
-  readonly label: string;
-}
-
-const PRIMARY_SECTIONS: readonly NavItem[] = [
-  { id: "conversation", label: "Conversation" },
-  { id: "activity", label: "Activity" },
-  { id: "settings", label: "Settings" },
-  { id: "keys", label: "Keys" },
-];
+const PRIMARY_SECTIONS = ["conversation", "activity", "settings", "keys"] as const;
 
 /** Persistent desktop sidebar owning section selection, live Host status, appearance, and Quit. */
 export function ShellSidebar() {
@@ -55,19 +45,19 @@ export function ShellSidebar() {
   };
 
   return (
-    <View class="w-56 bg-sidebar border-r border-sidebar-border p-3 justify-between gap-4">
+    <View class="basis-1/4 max-w-xs shrink-0 bg-sidebar border-r border-sidebar-border p-3 justify-between gap-4">
       <View class="gap-3">
         <View class="px-2 py-1 gap-0.5">
           <Text class="text-sm font-semibold text-sidebar-foreground">{brand.productName}</Text>
-          <Text class="text-xs text-muted-foreground">Desktop Workspace</Text>
+          <Text class="text-xs text-muted-foreground">{t("app.workspace")}</Text>
         </View>
-        <View role="navigation" accessibilityLabel="Workspace sections" class="gap-1">
-          {PRIMARY_SECTIONS.map((item) => (
+        <View role="navigation" accessibilityLabel={t("app.navigation")} class="gap-1">
+          {PRIMARY_SECTIONS.map((section) => (
             <ListItem
-              testID={`nav-${item.id}`}
-              title={item.label}
-              selected={activeSection() === item.id}
-              onPress={() => setActiveSection(item.id)}
+              testID={`nav-${section}`}
+              title={t("section." + section)}
+              selected={activeSection() === section}
+              onPress={() => setActiveSection(section)}
             />
           ))}
         </View>
@@ -76,7 +66,7 @@ export function ShellSidebar() {
             <Separator />
             <ListItem
               testID="nav-gallery"
-              title="Foundations Gallery"
+              title={t("gallery.title")}
               selected={activeSection() === "gallery"}
               onPress={() => setActiveSection("gallery")}
             />
@@ -100,30 +90,30 @@ export function ShellSidebar() {
             disabled={restarting() || isQuitting() || isRecoveryBusy()}
             onPress={handleRestartHost}
           >
-            Restart Host
+            {t("host.restart")}
           </Button>
         </If>
-        <Tabs testID="appearance-tabs" accessibilityLabel="Appearance mode">
+        <Tabs testID="appearance-tabs" accessibilityLabel={t("app.appearance")}>
           <Tab
             testID="theme-light"
             selected={appearance() === "light"}
             onPress={() => setAppearance("light")}
           >
-            Light
+            {t("app.light")}
           </Tab>
           <Tab
             testID="theme-dark"
             selected={appearance() === "dark"}
             onPress={() => setAppearance("dark")}
           >
-            Dark
+            {t("app.dark")}
           </Tab>
           <Tab
             testID="theme-system"
             selected={appearance() === "system"}
             onPress={() => setAppearance("system")}
           >
-            System
+            {t("app.system")}
           </Tab>
         </Tabs>
         <Button
@@ -133,7 +123,7 @@ export function ShellSidebar() {
           disabled={isQuitting()}
           onPress={requestQuit}
         >
-          {isQuitting() ? "Quitting…" : "Quit"}
+          {isQuitting() ? t("app.quitting") : t("app.quit")}
         </Button>
       </View>
     </View>

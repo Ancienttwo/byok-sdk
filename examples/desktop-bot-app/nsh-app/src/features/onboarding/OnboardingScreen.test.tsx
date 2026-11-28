@@ -6,14 +6,7 @@ import type { DeviceView, RuntimeView } from "../../../../src/host/settings/type
 
 type Call = { method: string; params: any };
 
-const ROLES: readonly RolePreset[] = [
-  {
-    id: "writer",
-    label: "Writer",
-    role: "Writes and edits text",
-    persona: "Clear, short sentences. Ask when the audience is unclear.",
-  },
-];
+const ROLES: readonly RolePreset[] = [{ id: "writer" }];
 
 const CATALOG_MODELS: readonly ModelChoice[] = [
   { id: "pi", label: "Pi", runtime: "pi", mcpToolsets: true, keyProfile: false },
@@ -110,7 +103,8 @@ describe("OnboardingScreen (#2547)", () => {
     await app.press("id:onboarding-continue");
     await app.waitFor("id:onboarding-save-error");
     expect(app.accessibility("id:onboarding-save-error")?.role).toBe("alert");
-    expect(app.shows("text:Host busy saving")).toBe(true);
+    expect(app.shows("text:The operation failed.")).toBe(true);
+    expect(app.shows("text:Host busy saving")).toBe(false);
     expect(app.shows("id:onboarding-screen")).toBe(true);
 
     // Retry sends the exact same generated id and transitions to Conversation with the Bot selected.

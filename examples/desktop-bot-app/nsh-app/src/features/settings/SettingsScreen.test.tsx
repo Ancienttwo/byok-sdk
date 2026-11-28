@@ -4,7 +4,7 @@ import {
   runtimeSignInGuidance,
   runtimeStatus,
   runtimeStatusMeta,
-  UNKNOWN_SIGN_IN_NOTE,
+
 } from "./runtimeStatus.ts";
 
 type Call = { method: string; params: any };
@@ -67,7 +67,7 @@ function settingsShell(
       "ByokShell.call": (method: string, params: any) => {
         calls.push({ method, params });
         if (method === "keys.list") return [];
-        if (method === "k8.view") return { bots: [RETURNING_BOT], roles: [], models: MODELS, busy: false };
+        if (method === "k8.view") return { bots: [RETURNING_BOT], roles: [{ id: "writer" }], models: MODELS, busy: false };
         if (method === "settings.device") return options.device ? options.device(params) : DEVICE;
         if (method === "settings.get") return { dreaming: (options.dreaming ?? (() => ({ enabled: true, models: ["m1"] })))() };
         if (method === "settings.setDreaming") return options.save?.(params) ?? { dreaming: params };
@@ -81,6 +81,70 @@ function settingsShell(
 const count = (calls: Call[], method: string) => calls.filter((call) => call.method === method).length;
 
 describe("SettingsScreen (#2461 Slice 5)", () => {
+  test("changes language in place, saves it, and returns to the system's preferred language", async () => {
+    const calls: Call[] = [];
+    let starts = 0;
+    const options = {
+      platform: "macos" as const,
+      width: 840,
+      height: 700,
+      locale: "en-US",
+      localeSettings: { languages: ["fr-FR", "zh-TW", "en-US"] },
+      storage: { language: "en" },
+      modules: {
+        "byok-nsh-adapter": {
+          ...settingsShell(calls)["byok-nsh-adapter"],
+          "ByokShell.start": () => {
+            starts += 1;
+            return { state: { state: "running", pid: 1, activeWork: 1234 } };
+          },
+        },
+      },
+    };
+    const app = await open("../../../App.tsx", options);
+    await app.press("id:nav-settings");
+    await app.waitFor("text:BYOK Bots — Settings");
+    await app.waitFor("id:settings-device");
+    const reads = calls.slice();
+
+    await app.press("id:settings-language");
+    await app.press("text:简体中文");
+    await app.waitFor("text:BYOK Bots — 设置");
+    expect(app.shows("text:通用")).toBe(true);
+    expect(app.shows("text:设备")).toBe(true);
+    expect(app.shows("text:运行中（1,234 个活动任务）")).toBe(true);
+    expect(app.storage().language).toBe("zh-Hans");
+
+    await app.press("id:settings-language");
+    await app.press("text:繁體中文");
+    await app.waitFor("text:BYOK Bots — 設定");
+    expect(app.shows("text:一般")).toBe(true);
+    expect(app.storage().language).toBe("zh-Hant");
+
+    await app.press("id:settings-language");
+    await app.press("text:跟隨系統");
+    await app.waitFor("text:跟隨系統");
+    expect(app.shows("text:BYOK Bots — 設定")).toBe(true);
+    expect(app.storage().language).toBe("system");
+    await app.setLocaleSettings({ languages: ["en-GB", "zh-TW"] });
+    await app.waitFor("text:BYOK Bots — Settings");
+    expect(calls).toEqual(reads);
+    expect(starts).toBe(1);
+
+    const reopened = await open("../../../App.tsx", { ...options, storage: { language: "zh-Hans" } });
+    await reopened.press("id:nav-settings");
+    await reopened.waitFor("text:BYOK Bots — 设置");
+    await reopened.press("id:nav-conversation");
+    await reopened.waitFor("text:Writer");
+    expect(reopened.shows("text:Writes")).toBe(true);
+    await reopened.press("id:conv-new-by-role");
+    await reopened.waitFor("text:写作助手");
+    await reopened.press("id:conv-new-writer");
+    expect(reopened.value("id:conv-profile-name")).toBe("写作助手");
+    expect(reopened.value("id:conv-profile-role")).toBe("撰写和编辑文本");
+    expect(reopened.value("id:conv-profile-persona")).toBe("用清晰的短句表达。读者不明确时先询问。");
+  });
+
   // Headless runs cannot send a Host state hint (a module stub gets the app's listener as data), so no test drives one;
   // the reads' source is the Host readiness and the Refresh count only.
   test("loads device and settings only on section entry, and shows the device facts", async () => {
@@ -93,12 +157,14 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
     await app.press("id:nav-settings");
     await app.waitFor("id:settings-device");
     expect(app.shows("text:Running, connected")).toBe(true);
-    expect(app.shows("text:Not measured: not-observed")).toBe(true);
+    expect(app.shows("text:Not measured: no observation yet")).toBe(true);
     expect(app.accessibility("id:settings-runtime-pi-verdict")?.label).toBe("allow");
     expect(app.accessibility("id:settings-runtime-codex-verdict")?.label).toBe("none reported");
-    expect(app.shows("text:not-found: not on PATH")).toBe(true);
+    expect(app.shows("text:Not installed")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("not on PATH");
     expect(app.accessibility("id:settings-doctor-worst")?.label).toBe("warn");
-    expect(app.shows("text:runtimes: codex not found")).toBe(true);
+    expect(app.shows("text:Runtimes")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("codex not found");
 
     await app.wait(50);
     expect(count(calls, "settings.device")).toBe(1);
@@ -439,9 +505,9 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
     expect(app.accessibility("id:settings-agent-claude-status")?.label).toBe("signed out");
     expect(app.shows("id:settings-agent-claude-signin-cmd")).toBe(true);
     expect(app.shows("text:claude auth login")).toBe(true);
-    expect(app.shows("text:Executable (path)")).toBe(true);
+    expect(app.shows("text:Executable (PATH)")).toBe(true);
     expect(app.shows("id:settings-agent-claude-executable")).toBe(true);
-    expect(app.accessibility("id:settings-agent-claude-executable")?.label).toBe("Executable (path): /usr/local/bin/claude");
+    expect(app.accessibility("id:settings-agent-claude-executable")?.label).toBe("Executable (PATH): /usr/local/bin/claude");
     expect(app.shows("text:Copy")).toBe(false);
 
     expect(app.accessibility("id:settings-agent-codex-status")?.label).toBe("signed out");
@@ -451,13 +517,14 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
 
     expect(app.accessibility("id:settings-agent-opencode-status")?.label).toBe("not checked");
     expect(app.shows("id:settings-agent-opencode-signin-cmd")).toBe(false);
-    expect(app.shows(`text:${UNKNOWN_SIGN_IN_NOTE}`)).toBe(true);
+    expect(app.shows("text:Sign in with the CLI's own command")).toBe(true);
 
     expect(app.accessibility("id:settings-agent-grok-status")?.label).toBe("check timed out");
     expect(app.accessibility("id:settings-agent-dsh-status")?.label).toBe("version blocked");
     expect(app.accessibility("id:settings-agent-agy-status")?.label).toBe("not installed");
     expect(app.accessibility("id:settings-agent-pi-status")?.label).toBe("can't run");
-    expect(app.shows("text:refused: runtime_environment_unavailable")).toBe(true);
+    expect(app.shows("text:The runtime’s environment could not be loaded.")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("runtime_environment_unavailable");
 
     // Initial load sends default (no checkAuth: true).
     const initialCalls = calls.filter((call) => call.method === "settings.device");
@@ -498,7 +565,7 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
           },
           "ByokShell.call": (method: string, params: any) => {
             calls.push({ method, params });
-            if (method === "k8.view") return { bots: [RETURNING_BOT], roles: [], models: MODELS, busy: false };
+            if (method === "k8.view") return { bots: [RETURNING_BOT], roles: [{ id: "writer" }], models: MODELS, busy: false };
             if (method === "settings.device") return DEVICE;
             if (method === "settings.get") return { dreaming: { enabled: true, models: ["m1"] } };
             if (method === "settings.loginItem") return { supported: true, enabled: false };
@@ -549,7 +616,7 @@ describe("runtimeStatus shared vocabulary (#2543)", () => {
     expect(runtimeSignInGuidance("codex")).toMatchObject({ kind: "command", command: "codex login" });
     expect(runtimeSignInGuidance("pi")).toMatchObject({ kind: "byok" });
     for (const id of ["grok", "agy", "opencode", "dsh"]) {
-      expect(runtimeSignInGuidance(id)).toEqual({ kind: "cli-unknown", note: UNKNOWN_SIGN_IN_NOTE });
+      expect(runtimeSignInGuidance(id)).toEqual({ kind: "cli-unknown", note: "Sign in with the CLI's own command" });
     }
   });
 });

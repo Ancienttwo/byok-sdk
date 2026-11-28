@@ -168,7 +168,8 @@ describe("ActivityScreen (#2461 Slice 5)", () => {
     await app.press("id:activity-approval-task-a-3-approve");
     await app.waitFor("id:activity-approval-task-a-3-error");
     expect(app.accessibility("id:activity-approval-task-a-3-error")?.role).toBe("alert");
-    expect(app.shows("text:The approval was already resolved")).toBe(true);
+    expect(app.shows("text:The operation failed.")).toBe(true);
+    expect(app.shows("text:The approval was already resolved")).toBe(false);
     await app.waitUntil(() => app.accessibility("id:activity-approval-task-a-3-status")?.label === "Approved");
     expect(app.shows("text:(by local)")).toBe(true);
     expect(app.shows("id:activity-approval-task-a-3-approve")).toBe(false);
@@ -201,14 +202,14 @@ describe("ActivityScreen (#2461 Slice 5)", () => {
     expect(app.shows("id:activity-card-task-a")).toBe(false);
     expect(app.accessibility("id:activity-card-task-b-toggle")?.expanded).toBe(false);
     expect(app.shows("text:Working on task-b")).toBe(false);
-    expect(app.shows("text:Host busy")).toBe(false);
+    expect(app.shows("text:The operation failed.")).toBe(false);
     expect(app.shows("text:Deploy")).toBe(true);
 
     await app.press("id:activity-approval-task-b-3-approve");
     await app.waitFor("id:activity-card-task-a");
     expect(app.accessibility("id:activity-card-task-a-toggle")?.expanded).toBe(true);
     expect(app.shows("text:Working on task-a")).toBe(true);
-    expect(app.shows("text:Host busy")).toBe(true);
+    expect(app.shows("text:The operation failed.")).toBe(true);
   });
 
   test("the card renders all seven timeline kinds, lost events, an empty timeline, and an unanswerable approval", async () => {
@@ -231,13 +232,13 @@ describe("ActivityScreen (#2461 Slice 5)", () => {
     await app.press("id:activity-card-task-a-toggle");
     await app.waitFor("text:Hello world");
     for (const text of [
-      "bash: output-available",
+      "bash: ✓ Completed",
       "Artifact report.md (text/markdown)",
       "Usage: 42 tokens",
-      "Error: boom",
+      "✕ Activity failed",
       "—",
       "Unrecognized event custom.thing",
-      "5 earlier events are no longer retained.",
+      "Earlier events no longer retained: 5.",
     ]) {
       expect(app.shows(`text:${text}`)).toBe(true);
     }
@@ -273,7 +274,8 @@ describe("ActivityScreen (#2461 Slice 5)", () => {
     await app.press("id:activity-approval-task-a-3-approve");
     await app.waitFor("id:activity-error");
     expect(app.accessibility("id:activity-error")?.role).toBe("alert");
-    expect(app.shows("text:Activity unavailable: Host busy")).toBe(true);
+    expect(app.shows("text:Activity unavailable: The operation failed.")).toBe(true);
+    expect(app.texts().join(" ")).not.toContain("Host busy");
     expect(app.shows("id:activity-card-task-a")).toBe(false);
 
     fail = false;

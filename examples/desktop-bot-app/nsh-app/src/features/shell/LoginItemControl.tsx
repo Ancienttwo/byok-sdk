@@ -1,6 +1,8 @@
+import { t } from "../../i18n.ts";
+import { errorText } from "../../statusCopy.ts";
 import { resource, signal, Text, View } from "nsh";
 import type { LoginItemView } from "../../../../src/bridge/domains/settings.ts";
-import { refusalOf } from "../../../../src/keys/submit.ts";
+import { toBridgeCallError } from "../../bridge.ts";
 import { readLoginItem, updateLoginItem } from "../../store.ts";
 import { Spinner, Switch } from "../../ui/index.ts";
 
@@ -20,8 +22,7 @@ export function LoginItemControl() {
     if (!err) {
       return null;
     }
-    const refusal = refusalOf(err);
-    return refusal.code ? `${refusal.code}: ${refusal.message}` : refusal.message;
+    return toBridgeCallError(err).code;
   };
   const supportedView = (): LoginItemView | null => {
     const current = view();
@@ -41,8 +42,7 @@ export function LoginItemControl() {
     try {
       updated.set(await updateLoginItem(enabled));
     } catch (error) {
-      const refusal = refusalOf(error);
-      updateError.set(refusal.code ? `${refusal.code}: ${refusal.message}` : refusal.message);
+      updateError.set(toBridgeCallError(error).code);
     } finally {
       pending.set(false);
     }
@@ -51,25 +51,25 @@ export function LoginItemControl() {
   return (
     <View class="gap-2">
       <If when={loaded.loading() && view() === null}>
-        <Spinner label="Checking login item setting…" />
+        <Spinner label={t("loginItem.loading")} />
       </If>
       <If when={loadError()}>
         {(msg) => (
           <View testID="login-item-error" role="alert">
-            <Text class="text-xs text-destructive">{`Login item unavailable: ${msg()}`}</Text>
+            <Text class="text-xs text-destructive">{t("loginItem.unavailable", { error: errorText(msg()) })}</Text>
           </View>
         )}
       </If>
       <If when={unsupported()}>
         <Text testID="login-item-unsupported" class="text-xs text-muted-foreground">
-          Not available on this platform.
+          {t("loginItem.unsupported")}
         </Text>
       </If>
       <If when={supportedView()}>
         {(item) => (
           <Switch
             testID="login-item-switch"
-            label="Open at login"
+            label={t("loginItem.open")}
             checked={item().enabled}
             disabled={pending()}
             onChange={(checked) => void toggle(checked)}
@@ -79,7 +79,7 @@ export function LoginItemControl() {
       <If when={updateError()}>
         {(msg) => (
           <View testID="login-item-error" role="alert">
-            <Text class="text-xs text-destructive">{`Login item unavailable: ${msg()}`}</Text>
+            <Text class="text-xs text-destructive">{t("loginItem.unavailable", { error: errorText(msg()) })}</Text>
           </View>
         )}
       </If>

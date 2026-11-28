@@ -1,3 +1,4 @@
+import { t } from "../i18n.ts";
 import { Overlay, Text, View } from "nsh";
 import { Toast as BaseToast, ToastStack as BaseToastStack } from "nsh/base";
 import { IconButton } from "./Button.tsx";
@@ -8,8 +9,8 @@ import { cx, POPOVER_SURFACE_CLASS } from "./tokens.ts";
 export interface ToastNotice {
   id: string;
   tone: "info" | "success" | "warning" | "danger";
-  title: string;
-  description?: string;
+  title: string | (() => string);
+  description?: string | (() => string);
 }
 
 export interface UiToastProps {
@@ -31,11 +32,15 @@ const TONE_COLOR = {
   danger: "text-destructive",
 } as const;
 
+const resolveText = (copy: ToastNotice["description"]) => typeof copy === "function" ? copy() : copy;
+
 /** Individual status toast notification pairing color with status icon and text. */
 export function Toast(props: UiToastProps) {
+  const title = () => resolveText(props.notice.title)!;
+  const description = () => resolveText(props.notice.description);
   return (
     <BaseToast
-      accessibilityLabel={props.notice.title}
+      accessibilityLabel={title()}
       class={cx(
         POPOVER_SURFACE_CLASS,
         "w-80 px-4 py-3 flex-row items-start justify-between gap-3",
@@ -52,16 +57,16 @@ export function Toast(props: UiToastProps) {
           class={TONE_COLOR[props.notice.tone]}
         />
         <View class="gap-0.5 flex-1">
-          <Text class="text-sm font-medium text-popover-foreground">{props.notice.title}</Text>
-          <If when={Boolean(props.notice.description)}>
-            <Text class="text-xs text-muted-foreground">{props.notice.description}</Text>
+          <Text class="text-sm font-medium text-popover-foreground">{title()}</Text>
+          <If when={Boolean(description())}>
+            <Text class="text-xs text-muted-foreground">{description()}</Text>
           </If>
         </View>
       </View>
       <IconButton
         icon="close"
         size="sm"
-        accessibilityLabel={`Dismiss ${props.notice.title}`}
+        accessibilityLabel={t("toast.dismiss", { title: title() })}
         onPress={() => props.onDismiss(props.notice.id)}
       />
     </BaseToast>

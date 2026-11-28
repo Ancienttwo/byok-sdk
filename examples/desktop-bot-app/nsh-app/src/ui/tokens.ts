@@ -22,16 +22,16 @@ export type BadgeVariant =
 export interface HostStateMeta {
   readonly badgeVariant: BadgeVariant;
   readonly symbol: string;
-  readonly label: string;
+
 }
 
 /** Semantic + non-color presentation metadata for every Host lifecycle state. */
 export const HOST_STATE_META: Readonly<Record<HostStateKey, HostStateMeta>> = {
-  starting: { badgeVariant: "hostStarting", symbol: "◐", label: "Starting" },
-  running: { badgeVariant: "hostRunning", symbol: "●", label: "Running" },
-  restarting: { badgeVariant: "hostRestarting", symbol: "↻", label: "Restarting" },
-  stopped: { badgeVariant: "hostStopped", symbol: "■", label: "Stopped" },
-  failed: { badgeVariant: "hostFailed", symbol: "▲", label: "Failed" },
+  starting: { badgeVariant: "hostStarting", symbol: "◐" },
+  running: { badgeVariant: "hostRunning", symbol: "●" },
+  restarting: { badgeVariant: "hostRestarting", symbol: "↻" },
+  stopped: { badgeVariant: "hostStopped", symbol: "■" },
+  failed: { badgeVariant: "hostFailed", symbol: "▲" },
 };
 
 /** Focus-visible ring shared across interactive controls. */

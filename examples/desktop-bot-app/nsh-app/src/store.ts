@@ -1,3 +1,5 @@
+import { formatNumber, t } from "./i18n.ts";
+import { errorText, restartSeconds } from "./statusCopy.ts";
 import { ByokShell } from "byok-nsh-adapter";
 import { resource, setColorScheme, signal, untracked } from "nsh";
 import type { WindowRef } from "nsh/desktop";
@@ -233,7 +235,7 @@ export async function decideApproval(taskId: string, approvalId: string, decisio
     await bridge.call(decision === "approve" ? "activity.approve" : "activity.reject", { taskId, approvalId });
     setApprovalDecision(key, null);
   } catch (error) {
-    setApprovalDecision(key, { running: null, error: toBridgeCallError(error).message });
+    setApprovalDecision(key, { running: null, error: toBridgeCallError(error).code });
   }
   reloadActivityCards();
 }
@@ -387,50 +389,23 @@ export function hideMainWindow(): void {
   mainWindowRef?.hide();
 }
 
-/**
- * The status of a Host with no state yet. A failed `ByokShell.start` leaves no supervisor, so no Host state ever
- * arrives: the status shows the start refusal that Keys shows (`shellStart`), not "Host starting".
- */
+/** A start refusal has no supervisor state, so the sidebar and tray report its coded error. */
 function hostlessStatus(start: ShellStart): string {
-  return start.status === "failed" ? `Host stopped: ${start.error.message}` : "Host starting";
+  return start.status === "failed"
+    ? t("host.stoppedWithError", { error: errorText(start.error.code) })
+    : t("host.startingDetail");
 }
 
-/** Human-readable status text matching Electron `HostStatus` copy. */
 export function describeHostState(host: SupervisedHostState | null, start: ShellStart): string {
-  if (host === null) {
-    return hostlessStatus(start);
-  }
-  switch (host.state) {
-    case "starting":
-      return "Host starting";
-    case "running":
-      return "Host running";
-    case "restarting":
-      return `Host restarting in ${Math.ceil(host.inMs / 1000)} s: ${host.reason}`;
-    case "stopped":
-      return `Host stopped: ${host.reason}`;
-    case "failed":
-      return `Host failed: ${host.reason}`;
-  }
+  if (host === null) return hostlessStatus(start);
+  if (host.state === "restarting") return t("host.restartingDetail", { seconds: restartSeconds(host) });
+  return t("host." + host.state + "Detail");
 }
 
-/** Concise tray status line matching Electron `trayMenu`. */
 export function trayStatusLabel(state: SupervisedHostState | null, start: ShellStart): string {
-  if (state === null) {
-    return hostlessStatus(start);
-  }
-  switch (state.state) {
-    case "running":
-      return `Active tasks: ${state.activeWork}`;
-    case "stopped":
-      return `Host stopped: ${state.reason}`;
-    case "restarting":
-      return `Host restarting: ${state.reason}`;
-    case "failed":
-      return `Host failed: ${state.reason}`;
-    case "starting":
-      return "Host starting";
-  }
+  return state?.state === "running"
+    ? t("host.activeTasks", { count: formatNumber(state.activeWork) })
+    : describeHostState(state, start);
 }
 
 function readPowerMessage(raw: unknown): string | null {

@@ -1,3 +1,5 @@
+import { HOST_STATE_META } from "./ui/tokens.ts";
+import { t } from "./i18n.ts";
 import { effect, platform, type Bounds } from "nsh";
 import {
   Application,
@@ -53,12 +55,12 @@ function canRestartFromMenu(options: TrayMenuBuildOptions): boolean {
 export function buildTrayMenuItems(options: TrayMenuBuildOptions): MenuItem[] {
   const canRestart = canRestartFromMenu(options);
   return [
-    { label: `Show ${options.productName}`, onSelect: options.onShow },
-    { label: trayStatusLabel(options.host, options.start), disabled: true },
+    { label: t("menu.showProduct", { product: options.productName }), onSelect: options.onShow },
+    { label: `${HOST_STATE_META[options.host?.state ?? (options.start.status === "failed" ? "stopped" : "starting")].symbol} ${trayStatusLabel(options.host, options.start)}`, disabled: true },
     { type: "separator" },
-    { label: "Restart Host", disabled: !canRestart, onSelect: options.onRestartHost },
+    { label: t("host.restart"), disabled: !canRestart, onSelect: options.onRestartHost },
     { type: "separator" },
-    { label: "Quit", onSelect: options.onQuit },
+    { label: t("app.quit"), onSelect: options.onQuit },
   ];
 }
 
@@ -70,11 +72,11 @@ export function buildApplicationMenuItems(options: ApplicationMenuBuildOptions):
       label: options.productName,
       submenu: [
         ...(platform.os === "macos"
-          ? [{ role: "about" as const }, { type: "separator" as const }]
+          ? [{ role: "about" as const, label: t("menu.about", { product: options.productName }) }, { type: "separator" as const }]
           : []),
-        { label: `Show ${options.productName}`, onSelect: options.onShow },
+        { label: t("menu.showProduct", { product: options.productName }), onSelect: options.onShow },
         {
-          label: "Restart Host",
+          label: t("host.restart"),
           // A disabled item's shortcut chooses nothing, so the key follows canRestartFromMenu too.
           shortcut: "mod+shift+r",
           disabled: !canRestart,
@@ -82,48 +84,48 @@ export function buildApplicationMenuItems(options: ApplicationMenuBuildOptions):
         },
         { type: "separator" },
         platform.os === "macos"
-          ? { role: "quit" }
-          : { label: "Quit", shortcut: "mod+q", onSelect: options.onQuit },
+          ? { role: "quit", label: t("menu.quitProduct", { product: options.productName }) }
+          : { label: t("app.quit"), shortcut: "mod+q", onSelect: options.onQuit },
       ],
     },
     {
-      label: "Edit",
+      label: t("menu.edit"),
       submenu: [
-        { role: "undo" },
-        { role: "redo" },
+        { role: "undo", label: t("menu.undo") },
+        { role: "redo", label: t("menu.redo") },
         { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "selectAll" },
+        { role: "cut", label: t("menu.cut") },
+        { role: "copy", label: t("menu.copy") },
+        { role: "paste", label: t("menu.paste") },
+        { role: "selectAll", label: t("menu.selectAll") },
       ],
     },
     {
-      label: "View",
+      label: t("menu.view"),
       submenu: [
         {
-          label: "Conversation",
+          label: t("section.conversation"),
           shortcut: "mod+1",
           when: "auto",
           checked: options.activeSection === "conversation",
           onSelect: () => options.onSelectSection("conversation"),
         },
         {
-          label: "Activity",
+          label: t("section.activity"),
           shortcut: "mod+2",
           when: "auto",
           checked: options.activeSection === "activity",
           onSelect: () => options.onSelectSection("activity"),
         },
         {
-          label: "Settings",
+          label: t("section.settings"),
           shortcut: "mod+3",
           when: "auto",
           checked: options.activeSection === "settings",
           onSelect: () => options.onSelectSection("settings"),
         },
         {
-          label: "Keys",
+          label: t("section.keys"),
           shortcut: "mod+4",
           when: "auto",
           checked: options.activeSection === "keys",
@@ -131,28 +133,28 @@ export function buildApplicationMenuItems(options: ApplicationMenuBuildOptions):
         },
         { type: "separator" },
         {
-          label: "Light Appearance",
+          label: t("menu.light"),
           checked: options.appearance === "light",
           onSelect: () => options.onSelectAppearance("light"),
         },
         {
-          label: "Dark Appearance",
+          label: t("menu.dark"),
           checked: options.appearance === "dark",
           onSelect: () => options.onSelectAppearance("dark"),
         },
         {
-          label: "System Appearance",
+          label: t("menu.system"),
           checked: options.appearance === "system",
           onSelect: () => options.onSelectAppearance("system"),
         },
       ],
     },
     {
-      label: "Window",
+      label: t("menu.window"),
       submenu: [
-        { role: "minimize" },
-        ...(platform.os === "macos" ? [{ role: "zoom" as const }] : []),
-        { role: "close" },
+        { role: "minimize", label: t("menu.minimize") },
+        ...(platform.os === "macos" ? [{ role: "zoom" as const, label: t("menu.zoom") }] : []),
+        { role: "close", label: t("common.close") },
       ],
     },
   ];

@@ -1,10 +1,11 @@
-import { cleanup, effect, mount, platform, Scroll, signal, Text, View } from "nsh";
+import { formatNumber, loadLanguagePreference, t } from "./src/i18n.ts";
+import { cleanup, effect, mount, platform, resource, Scroll, signal, Text, View } from "nsh";
 import { currentWindow, isAvailable } from "nsh/desktop";
 import brand from "../brand.config.ts";
 import { fitFirstWindow, installDesktopShell, syncDesktopChrome } from "./src/desktop.ts";
 import { ActivityScreen } from "./src/features/activity/ActivityScreen.tsx";
 import { ConversationScreen } from "./src/features/conversation/ConversationScreen.tsx";
-import { GalleryScreen } from "./src/features/gallery/GalleryScreen.tsx";
+import { GalleryScreen, loadGalleryTranslations } from "./src/features/gallery/GalleryScreen.tsx";
 import { KeysScreen } from "./src/features/keys/KeysScreen.tsx";
 import { OnboardingScreen } from "./src/features/onboarding/OnboardingScreen.tsx";
 import { SettingsScreen } from "./src/features/settings/SettingsScreen.tsx";
@@ -32,16 +33,16 @@ import {
 } from "./src/store.ts";
 import { Card, Spinner, ToastRegion, type ToastNotice } from "./src/ui/index.ts";
 
-const SECTION_TITLES: Record<WorkspaceSection, string> = {
-  conversation: "Conversation",
-  activity: "Activity",
-  settings: "Settings",
-  keys: "Keys",
-  // The Gallery exists only in development builds: a release build folds this to "" and drops the title text.
-  gallery: process.env.NODE_ENV !== "production" ? "Foundations Gallery" : "",
-};
+function sectionTitle(section: WorkspaceSection): string {
+  if (section === "gallery") return process.env.NODE_ENV !== "production" ? t("gallery.title") : "";
+  return t("section." + section);
+}
+
+const windowTitle = () => t("app.title", { product: brand.productName, section: sectionTitle(activeSection()) });
 
 export function App() {
+  if (process.env.NODE_ENV !== "production") loadGalleryTranslations();
+  const language = resource(() => true, loadLanguagePreference);
   const win = isAvailable ? currentWindow() : null;
   if (win) {
     fitFirstWindow(win);
@@ -50,7 +51,7 @@ export function App() {
   effect(() => {
     if (win) {
       win.set({
-        title: `${brand.productName} — ${SECTION_TITLES[activeSection()]}`,
+        title: windowTitle(),
       });
     }
   });
@@ -84,7 +85,7 @@ export function App() {
 
   const notices = signal<ToastNotice[]>([]);
 
-  const pushToast = (tone: ToastNotice["tone"], title: string, description?: string) => {
+  const pushToast = (tone: ToastNotice["tone"], title: ToastNotice["title"], description?: ToastNotice["description"]) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     notices.update((list) => [...list.slice(-3), { id, tone, title, description }]);
   };
@@ -102,14 +103,14 @@ export function App() {
           <Card>
             <View class="gap-1">
               <Text role="header" accessibilityLevel={1} class="text-lg font-semibold text-foreground">
-                {`${brand.productName} — ${SECTION_TITLES[activeSection()]}`}
+                {windowTitle()}
               </Text>
               <Text class="text-xs text-muted-foreground">
-                {`Platform: ${platform.os} • Hints: ${stateHintCount()} • Quitting: ${isQuitting() ? "yes" : "no"}`}
+                {t("app.info", { platform: platform.os, hints: formatNumber(stateHintCount()), quitting: t(isQuitting() ? "common.yes" : "common.no") })}
               </Text>
             </View>
             <If when={Boolean(powerError())}>
-              <Text class="text-xs text-warning">{`Power save notice: ${powerError()}`}</Text>
+              <Text class="text-xs text-warning">{t("host.powerNotice")}</Text>
             </If>
           </Card>
 
@@ -117,7 +118,7 @@ export function App() {
 
           <If when={onboardingPending()}>
             <View testID="onboarding-pending" class="py-8 items-center justify-center">
-              <Spinner label="Loading…" />
+              <Spinner label={t("common.loading")} />
             </View>
           </If>
 
@@ -130,7 +131,7 @@ export function App() {
           </If>
 
           <If when={!onboardingPending() && !showOnboarding() && activeSection() === "settings"}>
-            <SettingsScreen />
+            <SettingsScreen languageLoadFailed={language.error() !== undefined} />
           </If>
 
           <If when={!onboardingPending() && !showOnboarding() && activeSection() === "conversation"}>

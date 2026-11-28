@@ -1,6 +1,8 @@
+import { t } from "../../i18n.ts";
+import { errorText } from "../../statusCopy.ts";
 import { resource, signal, Text, View } from "nsh";
 import type { SupervisedHostState } from "../../../../src/bridge/protocol.ts";
-import { refusalOf, type Refusal } from "../../../../src/keys/submit.ts";
+import { toBridgeCallError } from "../../bridge.ts";
 import {
   exportDiagnostics,
   hostState,
@@ -14,9 +16,6 @@ import {
 } from "../../store.ts";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, Spinner } from "../../ui/index.ts";
 
-function formatRefusalText(refusal: Refusal): string {
-  return refusal.code ? `${refusal.code}: ${refusal.message}` : refusal.message;
-}
 
 /** Triggers `settings.exportDiagnostics` and announces the output path via a polite live region. */
 export function DiagnosticsExportButton(props: { testID: string; disabled?: boolean }) {
@@ -35,7 +34,7 @@ export function DiagnosticsExportButton(props: { testID: string; disabled?: bool
       const out = await exportDiagnostics();
       path.set(out.path);
     } catch (error) {
-      errorMessage.set(formatRefusalText(refusalOf(error)));
+      errorMessage.set(toBridgeCallError(error).code);
     } finally {
       busy.set(false);
     }
@@ -52,7 +51,7 @@ export function DiagnosticsExportButton(props: { testID: string; disabled?: bool
           disabled={busy() || Boolean(props.disabled)}
           onPress={() => void runExport()}
         >
-          Export diagnostics
+          {t("recovery.export")}
         </Button>
       </View>
       <If when={path()}>
@@ -62,16 +61,16 @@ export function DiagnosticsExportButton(props: { testID: string; disabled?: bool
             role="region"
             accessibilityLiveRegion="polite"
             accessible
-            accessibilityLabel={`Written to ${savedPath()}`}
+            accessibilityLabel={t("recovery.exported", { path: savedPath() })}
           >
-            <Text class="text-xs font-mono text-muted-foreground">{`Written to ${savedPath()}`}</Text>
+            <Text class="text-xs font-mono text-muted-foreground">{t("recovery.exported", { path: savedPath() })}</Text>
           </View>
         )}
       </If>
       <If when={errorMessage()}>
         {(msg) => (
           <View testID={`${props.testID}-error`} role="alert">
-            <Text class="text-xs text-destructive">{`Export failed: ${msg()}`}</Text>
+            <Text class="text-xs text-destructive">{t("recovery.exportError", { error: errorText(msg()) })}</Text>
           </View>
         )}
       </If>
@@ -98,15 +97,15 @@ export function RecoveryPanel() {
     async () => await readShellView(),
   );
 
-  const shellViewError = (): Refusal | null => {
+  const shellViewError = (): string | null => {
     const err = shellView.error();
-    return err ? refusalOf(err) : null;
+    return err === undefined ? null : toBridgeCallError(err).code;
   };
   const restoreInfo = () => shellView()?.restore ?? null;
-  const restoreErrorText = () => shellView()?.restoreError ?? null;
+  const restoreUnavailable = () => shellView()?.restoreError != null;
 
   const confirmAction = signal<"restore" | "startFresh" | null>(null);
-  const recoveryError = signal<string | null>(null);
+  const recoveryError = signal<{ action: "restore" | "startFresh"; code: string } | null>(null);
   const restarting = signal(false);
 
   const runRecovery = async (action: "restore" | "startFresh") => {
@@ -122,9 +121,7 @@ export function RecoveryPanel() {
         await runShellStartFresh();
       }
     } catch (error) {
-      const refusal = refusalOf(error);
-      const prefix = action === "restore" ? "Restore failed" : "Start fresh failed";
-      recoveryError.set(`${prefix}: ${formatRefusalText(refusal)}`);
+      recoveryError.set({ action, code: toBridgeCallError(error).code });
     }
   };
 
@@ -145,8 +142,10 @@ export function RecoveryPanel() {
           <View testID="shell-recovery-panel" role="alert">
             <Card class="border-destructive">
               <CardHeader>
-                <CardTitle>The Host stopped</CardTitle>
-                <CardDescription>{host().reason}</CardDescription>
+                <CardTitle>{t("recovery.stopTitle")}</CardTitle>
+                <If when={host().storeRefused}>
+                  <CardDescription>{t("recovery.storeRefused")}</CardDescription>
+                </If>
               </CardHeader>
               <CardContent>
                 <DiagnosticsExportButton
@@ -155,19 +154,17 @@ export function RecoveryPanel() {
                 />
 
                 <If when={shellView.loading() && shellView() === undefined}>
-                  <Spinner label="Checking S1 recovery snapshot…" />
+                  <Spinner label={t("recovery.snapshotLoading")} />
                 </If>
                 <If when={shellViewError()}>
                   {(err) => (
                     <Text class="text-xs text-destructive">
-                      {`Shell status unavailable: ${formatRefusalText(err())}`}
+                      {t("recovery.shellError", { error: errorText(err()) })}
                     </Text>
                   )}
                 </If>
-                <If when={restoreErrorText()}>
-                  {(msg) => (
-                    <Text class="text-xs text-destructive">{`Restore unavailable: ${msg()}`}</Text>
-                  )}
+                <If when={restoreUnavailable()}>
+                  <Text class="text-xs text-destructive">{t("recovery.snapshotError")}</Text>
                 </If>
 
                 <View class="flex-row flex-wrap items-center gap-2">
@@ -179,7 +176,7 @@ export function RecoveryPanel() {
                         disabled={isRecoveryBusy() || isQuitting()}
                         onPress={() => confirmAction.set("restore")}
                       >
-                        {`Restore data of version ${restore().version}`}
+                        {t("recovery.restoreVersion", { version: restore().version })}
                       </Button>
                     )}
                   </If>
@@ -190,7 +187,7 @@ export function RecoveryPanel() {
                       disabled={isRecoveryBusy() || isQuitting()}
                       onPress={() => confirmAction.set("startFresh")}
                     >
-                      Start fresh
+                      {t("recovery.startFresh")}
                     </Button>
                   </If>
                 </View>
@@ -198,7 +195,7 @@ export function RecoveryPanel() {
                 <If when={recoveryError()}>
                   {(msg) => (
                     <View testID="recovery-error" role="alert">
-                      <Text class="text-xs text-destructive">{msg()}</Text>
+                      <Text class="text-xs text-destructive">{t(msg().action === "restore" ? "recovery.restoreError" : "recovery.freshError", { error: errorText(msg().code) })}</Text>
                     </View>
                   )}
                 </If>
@@ -209,17 +206,15 @@ export function RecoveryPanel() {
       </If>
 
       <If when={failedHost()}>
-        {(host) => (
           <View testID="shell-failed-panel" role="alert">
             <Card class="border-destructive">
               <CardHeader>
-                <CardTitle>The Host failed</CardTitle>
-                <CardDescription>{host().reason}</CardDescription>
+                <CardTitle>{t("recovery.failedTitle")}</CardTitle>
               </CardHeader>
               <CardContent>
                 {/* The Host has exited, so a diagnostics export could only refuse with host_exited. */}
                 <Text testID="shell-failed-hint" class="text-xs text-muted-foreground">
-                  Restart the Host; once it runs, Settings can export diagnostics.
+                  {t("recovery.failedHint")}
                 </Text>
                 <View class="flex-row flex-wrap items-center gap-2">
                   <Button
@@ -229,23 +224,22 @@ export function RecoveryPanel() {
                     disabled={restarting() || isQuitting() || isRecoveryBusy()}
                     onPress={handleRestart}
                   >
-                    Restart Host
+                    {t("host.restart")}
                   </Button>
                 </View>
               </CardContent>
             </Card>
           </View>
-        )}
       </If>
 
       <Dialog
         testID="recovery-restore-dialog"
         open={confirmAction() === "restore"}
         role="alertdialog"
-        title="Restore pre-update snapshot?"
+        title={t("recovery.confirmRestore")}
         description={
           restoreInfo()
-            ? `The app stops, renames the current data to *.aside-<time> next to where it was (nothing is deleted), puts back the copy version ${restoreInfo()!.version} kept before its update, and restarts.`
+            ? t("recovery.confirmRestoreDetail", { version: restoreInfo()!.version })
             : undefined
         }
         onOpenChange={(open) => {
@@ -262,7 +256,7 @@ export function RecoveryPanel() {
               disabled={isRecoveryBusy()}
               onPress={() => confirmAction.set(null)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               testID="recovery-restore-confirm"
@@ -272,13 +266,13 @@ export function RecoveryPanel() {
               disabled={isRecoveryBusy()}
               onPress={() => void runRecovery("restore")}
             >
-              Restore and restart
+              {t("recovery.restoreAndRestart")}
             </Button>
           </View>
         }
       >
         <Text class="text-xs text-muted-foreground">
-          Existing directories are moved aside rather than deleted.
+          {t("recovery.keepsDirectories")}
         </Text>
       </Dialog>
 
@@ -286,8 +280,8 @@ export function RecoveryPanel() {
         testID="recovery-start-fresh-dialog"
         open={confirmAction() === "startFresh"}
         role="alertdialog"
-        title="Move data aside and start fresh?"
-        description="The app stops and renames its data folders to *.aside-<time> next to where they were; nothing is deleted. It removes this device's enrollment and restarts as a new device with no Bots and no provider profiles."
+        title={t("recovery.confirmFresh")}
+        description={t("recovery.confirmFreshDetail")}
         onOpenChange={(open) => {
           if (!open && !isRecoveryBusy()) {
             confirmAction.set(null);
@@ -302,7 +296,7 @@ export function RecoveryPanel() {
               disabled={isRecoveryBusy()}
               onPress={() => confirmAction.set(null)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               testID="recovery-start-fresh-confirm"
@@ -312,13 +306,13 @@ export function RecoveryPanel() {
               disabled={isRecoveryBusy()}
               onPress={() => void runRecovery("startFresh")}
             >
-              Move the data aside and start fresh
+              {t("recovery.moveAndRestart")}
             </Button>
           </View>
         }
       >
         <Text class="text-xs text-muted-foreground">
-          Provider keys stay in the OS credential store; a new profile still needs its key entered.
+          {t("recovery.keepsKeys")}
         </Text>
       </Dialog>
     </View>
