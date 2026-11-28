@@ -44,6 +44,8 @@ export interface ModelChoice {
   readonly runtime: string;
   /** The adapter's `capabilities.mcpToolsets` (omission is unsupported): whether a Bot on this model can take toolsets. */
   readonly mcpToolsets: boolean;
+  /** A `pi:<profile_ref>` entry: its keys profile is the credential, so the runtime's own login state does not apply. */
+  readonly keyProfile: boolean;
 }
 
 /** The catalog id of the Pi entry pinned to one keys profile. */
@@ -90,7 +92,7 @@ export function executionCatalog(
     models[descriptor.id] = template(descriptor.id);
     choices.push({
       id: descriptor.id, label: brand.models[descriptor.id]?.label ?? descriptor.id, runtime: descriptor.id,
-      mcpToolsets: descriptor.capabilities.mcpToolsets === true,
+      mcpToolsets: descriptor.capabilities.mcpToolsets === true, keyProfile: false,
     });
   }
   // A profile entry runs on the Pi adapter: without it there is none.
@@ -101,7 +103,7 @@ export function executionCatalog(
     const id = profileModelId(profile.profile_ref);
     if (Object.hasOwn(models, id)) throw new Error(`Runtime ${id} collides with the keys profile ${profile.profile_ref}`);
     models[id] = entry;
-    choices.push({ id, label: profile.display_name, runtime: 'pi', mcpToolsets: pi?.capabilities.mcpToolsets === true });
+    choices.push({ id, label: profile.display_name, runtime: 'pi', mcpToolsets: pi?.capabilities.mcpToolsets === true, keyProfile: true });
   }
   return { execution: models[first.id]!, models, choices };
 }

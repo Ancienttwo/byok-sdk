@@ -6,7 +6,7 @@ import type { DeviceView, RuntimeView } from "../../../../src/host/settings/type
 type Call = { method: string; params: any };
 
 const ROLES = [{ id: "writer", label: "Writer", role: "Writes and edits text", persona: "Clear, short sentences." }];
-const MODELS = [{ id: "zai-chat", label: "ZAI Chat", runtime: "pi", mcpToolsets: true }];
+const MODELS = [{ id: "zai-chat", label: "ZAI Chat", runtime: "pi", mcpToolsets: true, keyProfile: false }];
 
 function device(runtimes: readonly RuntimeView[]): DeviceView {
   return {
@@ -702,10 +702,10 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
 
   describe("Bot picker availability (#2546)", () => {
     const PICKER_MODELS = [
-      { id: "codex", label: "Codex", runtime: "codex", mcpToolsets: true },
-      { id: "claude", label: "Claude Code", runtime: "claude", mcpToolsets: true },
-      { id: "grok", label: "grok", runtime: "grok", mcpToolsets: false },
-      { id: "pi", label: "Pi", runtime: "pi", mcpToolsets: true },
+      { id: "codex", label: "Codex", runtime: "codex", mcpToolsets: true, keyProfile: false },
+      { id: "claude", label: "Claude Code", runtime: "claude", mcpToolsets: true, keyProfile: false },
+      { id: "grok", label: "grok", runtime: "grok", mcpToolsets: false, keyProfile: false },
+      { id: "pi", label: "Pi", runtime: "pi", mcpToolsets: true, keyProfile: false },
     ];
     const pickerSnapshot = (bots: readonly BotView[]) => ({ ...snapshot(bots), models: PICKER_MODELS });
     const item = (app: Awaited<ReturnType<typeof openConversation>>, title: string) => app.accessibility(`label:${title}`);
@@ -785,13 +785,44 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
       timedOut = false;
       await app.press("id:conv-profile-check-again");
       await app.waitFor("id:conv-profile-model-status", { state: "gone" });
-      expect(app.shows("text:Codex")).toBe(true);
+      // A signed-in choice shows the shared status symbol and text too.
+      expect(app.shows("text:Codex · ✓ signed in")).toBe(true);
       await app.press("id:conv-profile-save");
       await app.waitFor("id:conv-profile", { state: "gone" });
       expect(calls.filter((call) => call.method === "k8.saveBot").map((call) => call.params)).toEqual([
         { id: "a", name: "Bot a", role: "Writes", persona: "Short.", model: "codex" },
       ]);
       expect(calls.filter((call) => call.method === "settings.device").map((call) => call.params ?? null)).toEqual([null, { checkAuth: true }]);
+    });
+
+    const WORK_KEY = { id: "pi:work", label: "Work key", runtime: "pi", mcpToolsets: true, keyProfile: true };
+    const profileShell = (calls: Call[], pi: RuntimeView) =>
+      conversationShell(calls, () => ({ ...snapshot([]), models: [...PICKER_MODELS, WORK_KEY] }), () => null, () => MEMORY, () => device([pi]));
+
+    test("a keys-profile choice ignores the standalone Pi login: no sign-out status and no sign-in guidance", async () => {
+      const calls: Call[] = [];
+      const app = await openConversation(profileShell(calls, { ...PI_READY, authPresent: false }));
+      await app.press("id:conv-new-by-role");
+      await app.press("id:conv-new-writer");
+      await app.waitFor("text:Pi · ○ signed out");
+      await app.press("id:conv-profile-model");
+      expect(item(app, "Work key")?.disabled).toBe(false);
+      await app.press("label:Work key");
+      expect(app.shows("id:conv-profile-model-status")).toBe(false);
+      expect(app.shows("id:conv-profile-model-signin")).toBe(false);
+      await app.press("id:conv-profile-save");
+      await app.waitFor("id:conv-profile", { state: "gone" });
+      expect(calls.find((call) => call.method === "k8.saveBot")?.params).toMatchObject({ model: "pi:work" });
+    });
+
+    test("a keys-profile choice shows its runtime's version status and is not selectable while the version is blocked", async () => {
+      const calls: Call[] = [];
+      const app = await openConversation(profileShell(calls, { ...PI_READY, verdict: "block", authPresent: true }));
+      await app.press("id:conv-new-by-role");
+      await app.press("id:conv-new-writer");
+      await app.waitFor("id:conv-profile-no-agent");
+      await app.press("id:conv-profile-model");
+      expect(item(app, "Work key · ✕ version blocked")?.disabled).toBe(true);
     });
   });
 });

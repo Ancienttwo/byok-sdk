@@ -68,8 +68,8 @@ export function ProfileEditor(props: ProfileEditorProps) {
     if (model === undefined || device() === undefined) {
       return undefined;
     }
-    const state = availability(model);
-    return state.selectable && state.status.key !== "signed-out" ? undefined : { model, ...state };
+    const { status, selectable } = availability(model);
+    return status === null || (selectable && status.key !== "signed-out") ? undefined : { model, status };
   };
   const signInNote = (runtime: string) => {
     const guidance = runtimeSignInGuidance(runtime);
@@ -162,7 +162,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
                         const state = availability(model);
                         return {
                           value: model.id,
-                          title: state.status.key === "signed-in" ? model.label : `${model.label} · ${state.status.symbol} ${state.status.label}`,
+                          title: state.status === null ? model.label : `${model.label} · ${state.status.symbol} ${state.status.label}`,
                           disabled: !state.selectable,
                         };
                       })}

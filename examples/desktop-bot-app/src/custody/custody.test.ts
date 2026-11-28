@@ -106,7 +106,7 @@ describe('custody child', () => {
     const claude = { descriptor: { id: 'claude', selectionModes: ['device-default'], capabilities: {} } } as unknown as Pick<RuntimeAdapter, 'descriptor'>;
     const brand = { instruction: 'reply', models: { pi: { label: 'Pi' } } };
     const catalog = executionCatalog(brand, 'device', [pi], [profile!, { ...withoutPi, profile_ref: 'no-pi' }]);
-    expect(catalog.choices).toEqual([{ id: 'pi', label: 'Pi', runtime: 'pi', mcpToolsets: true }, { id: 'pi:writer', label: 'Writer model', runtime: 'pi', mcpToolsets: true }]);
+    expect(catalog.choices).toEqual([{ id: 'pi', label: 'Pi', runtime: 'pi', mcpToolsets: true, keyProfile: false }, { id: 'pi:writer', label: 'Writer model', runtime: 'pi', mcpToolsets: true, keyProfile: true }]);
     expect(catalog.models['pi:writer']).toEqual(catalogEntryFor(profile!, catalog.models.pi!));
     expect(executionCatalog(brand, 'device', [claude], [profile!]).choices.map(choice => choice.id)).toEqual(['claude']);
     const colliding = { descriptor: { ...pi.descriptor, id: 'pi:writer' } } as unknown as Pick<RuntimeAdapter, 'descriptor'>;

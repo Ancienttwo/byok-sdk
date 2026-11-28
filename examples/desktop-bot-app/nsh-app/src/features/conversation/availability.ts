@@ -10,18 +10,25 @@ import { runtimeStatus, runtimeStatusMeta, type RuntimeStatusKey, type RuntimeSt
 const SELECTABLE: ReadonlySet<RuntimeStatusKey> = new Set(["signed-in", "signed-out", "untested-version", "not-checked"]);
 
 export interface ChoiceAvailability {
-  readonly status: RuntimeStatusMeta;
+  /** Null for a keys-profile choice whose runtime is present at an allowed version: it has no status to report. */
+  readonly status: RuntimeStatusMeta | null;
   readonly selectable: boolean;
 }
 
 /**
  * A choice's availability from the latest `settings.device` read, in the one runtime status vocabulary. A runtime the
- * read does not report (no read yet, or the Host did not detect it) is not checked and takes no Bot.
+ * read does not report (no read yet, or the Host did not detect it) is not checked and takes no Bot. A keys-profile
+ * choice runs on its profile, not the standalone Pi login, so only the runtime's presence and version decide it.
  */
 export function choiceAvailability(choice: ModelChoice, runtimes: readonly RuntimeView[] | undefined): ChoiceAvailability {
   const runtime = runtimes?.find((view) => view.id === choice.runtime);
   if (runtime === undefined) {
     return { status: runtimeStatusMeta("not-checked"), selectable: false };
+  }
+  if (choice.keyProfile) {
+    const { authPresent: _login, ...presence } = runtime;
+    const status = runtimeStatus(presence);
+    return status.key === "not-checked" ? { status: null, selectable: true } : { status, selectable: SELECTABLE.has(status.key) };
   }
   const status = runtimeStatus(runtime);
   return { status, selectable: SELECTABLE.has(status.key) };
