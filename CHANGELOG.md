@@ -2,18 +2,28 @@
 
 ## Unreleased
 
-- **Added (client, #2514).** Opt in to `CursorAdapter` on macOS and Linux with a user-installed Cursor Agent CLI and `cursor-agent login`. Phase 1 includes fake-CLI contract coverage. [Host setup](docs/releases/host-upgrade-next-minor.md#cursor-agent-cli-2514)
+## 0.48.0 (prepared, 2026-11-28)
 
-- **Breaking (client, keys, #2522, #2585).** The official Pi closure moves to 1.7.0. Re-prepare Pi inputs, rebind Host accounting rulings, and replace model IDs removed from the pinned catalog. Existing durable SQLite replicas open in place. [Host steps](docs/releases/host-upgrade-next-minor.md#pi-170-closure-2585)
-- **Changed (client, #2585).** The client vendors OAR 0.140.0. The SDK keeps its own Pi launcher and RPC client.
-- **Changed (client, #2521).** Antigravity CLI 1.5.18 is qualified. `AgyAdapter.accountUsage()` requires `{ allowPrintMode: true }` to run its quota commands. agy subprocesses use `AGY_CLI_DISABLE_AUTO_UPDATE=true`. [Host steps](docs/releases/host-upgrade-next-minor.md#oar-01381-2521)
+[Candidate notes](docs/releases/v0.48.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.48.0.md)
+
+0.48.0 keeps wire v8. Existing 0.47.1 server databases, daemon journals, provider stores, and device pairings carry forward in place. The manifest has three breaking and seven additive entries.
+
+- **Breaking (all public packages, #2533).** Upgrade Node.js to 24.22.3 or later before installing the SDK. [Host steps](docs/releases/host-upgrade-0.48.0.md#nodejs-24223-minimum)
+- **Added (client, #2514).** Opt in to `CursorAdapter` on macOS and Linux with a user-installed Cursor Agent CLI and `cursor-agent login`. Phase 1 includes fake-CLI contract coverage and remains unqualified. [Host setup](docs/releases/host-upgrade-0.48.0.md#cursor-agent-cli-2514)
+- **Breaking (client, keys, #2522, #2585).** The official Pi closure moves to 1.7.0. Re-prepare Pi inputs, rebind Host accounting rulings, and replace model IDs removed from the pinned catalog. Existing durable SQLite replicas open in place. [Host steps](docs/releases/host-upgrade-0.48.0.md#pi-170-closure-2585)
+- **Changed (client, #2585 and #2587).** The client vendors OAR 0.140.0. The SDK keeps its own Pi launcher and RPC client.
+- **Breaking (client, #2521).** Antigravity CLI 1.5.18 is qualified. `AgyAdapter.accountUsage()` requires `{ allowPrintMode: true }` to run its quota commands. agy subprocesses use `AGY_CLI_DISABLE_AUTO_UPDATE=true`. [Host steps](docs/releases/host-upgrade-0.48.0.md#oar-01381-2521)
 - **Fixed (client, #2521).** Codex secret answers are scrubbed from the matching native output before SDK recording and projection.
-- **Added (client, #2524).** Hosts can check installed runtime versions offline against OAR's suggested minimums for recent models. Hosts control any live manifest refresh. [Host steps](docs/releases/host-upgrade-next-minor.md#suggested-runtime-versions-2524)
-- **Added (client, protocol, #2523).** Hosts can select a Codex or Claude service tier and authorize default-tier fallback on wire v8. Both adapters verify the applied tier before dispatching the prompt and report it in task activity. [Host steps](docs/releases/host-upgrade-next-minor.md#host-selected-service-tier-2523)
-
-- **Changed (client, #2512).** The client vendors OAR 0.136.0 (from 0.131.0). OpenCode 2.x `listModels()` reads the full catalog from a private loopback listener, and `effortLevels` drops OpenCode's `default` variant. Antigravity usage window labels drop the trailing "Remaining". [Host steps](docs/releases/host-upgrade-next-minor.md#oar-01360-2512-2513)
+- **Added (client, #2524).** Hosts can check installed runtime versions offline against OAR's suggested minimums for recent models. Hosts control any live manifest refresh. [Host steps](docs/releases/host-upgrade-0.48.0.md#suggested-runtime-versions-2524)
+- **Added (client, protocol, #2523).** Hosts can select a Codex or Claude service tier and authorize default-tier fallback on wire v8. Both adapters verify the applied tier before dispatching the prompt and report it in task activity. [Host steps](docs/releases/host-upgrade-0.48.0.md#host-selected-service-tier-2523)
+- **Changed (client, #2512).** The client vendors OAR 0.136.0 (from 0.131.0). OpenCode 2.x `listModels()` reads the full catalog from a private loopback listener, and `effortLevels` drops OpenCode's `default` variant. Antigravity usage window labels drop the trailing "Remaining". [Host steps](docs/releases/host-upgrade-0.48.0.md#oar-01360-2512-2513)
 - **Fixed (client, #2512).** `ClaudeAdapter` declines MCP elicitation requests instead of hanging an unattended task or ending a `nativeInteractions` task.
-- **Fixed (client, #2513).** With `nativeInteractions`, `CodexAdapter` enables `default_mode_request_user_input`, so Codex 0.107.0 and later ask the Host outside plan mode.
+- **Fixed (client, #2513).** With `nativeInteractions`, `CodexAdapter` enables `default_mode_request_user_input` so it can ask the Host outside plan mode, and requires a verified Codex version of 0.107.0 or later.
+- **Added (server, cloud, #2559).** Servers can opt in to the Host MCP task-context capability and verify task assertions before invoking Host tools. [Host steps](docs/releases/host-upgrade-0.48.0.md#host-mcp-task-context-2559)
+- **Changed (client, bot-collaboration, #2564).** Supported adapters project Host-toolset calls with canonical MCP server and tool identity. [Host steps](docs/releases/host-upgrade-0.48.0.md#host-toolset-observations-2564)
+- **Fixed (keys, server, client, #2530).** The store precheck reports a changed store when the main file or a sidecar vanishes during the copy. [Details](docs/releases/v0.48.0.md#fixed)
+- **Added (protocol, core, cloud, server, #2575 and #2580).** Wire v8 carries `requiredSkills` on Agent offers gated by `skill-selection`. The wire contract ships ahead of device registry and projection support (#2576 and #2577, parent #2563). [Host steps](docs/releases/host-upgrade-0.48.0.md#task-scoped-skills-wire-2575)
+- **Added (bot-collaboration, #2578 and #2583).** Host-owned Bot skills merge with template `requiredSkills` for K8 Turns. Daily dreams omit required skills. [Host steps](docs/releases/host-upgrade-0.48.0.md#bot-profile-skills-2578)
 
 ## 0.47.1 — 2026-11-26 (published)
 

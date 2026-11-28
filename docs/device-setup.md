@@ -1461,11 +1461,11 @@ their source contract rather than being assigned invented release versions:
   [the shared approval path](security.md#3-shared-approval-path).
 
 <!-- generated:migrations:start -->
-Manifest transition: **0.47.1 → 0.47.1**. Versions and entries below come from the current package manifest; they are not a release announcement.
+Manifest transition: **0.47.1 → 0.48.0**. Versions and entries below come from the current package manifest; they are not a release announcement.
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
-| cursor-agent-cli | additive | CursorAdapter adds an opt-in Cursor Agent CLI harness on macOS and Linux. It uses the device user's CLI login. Phase 1 has fake-CLI coverage. [Migration](../docs/releases/host-upgrade-next-minor.md#cursor-agent-cli-2514) |
+| cursor-agent-cli | additive | CursorAdapter adds an opt-in Cursor Agent CLI harness on macOS and Linux. It uses the device user's CLI login. Phase 1 has fake-CLI coverage. [Migration](../docs/releases/host-upgrade-0.48.0.md#cursor-agent-cli-2514) |
 <!-- generated:migrations:end -->
 
 ## Maintaining this guide

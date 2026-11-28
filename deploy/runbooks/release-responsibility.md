@@ -77,6 +77,11 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
+0.48.0 is the MINOR candidate for all nine public packages. It keeps wire v8
+and carries three breaking and seven additive manifest entries.
+[Candidate notes](../../docs/releases/v0.48.0.md) ·
+[Host upgrade checklist](../../docs/releases/host-upgrade-0.48.0.md)
+
 0.47.1 is the published PATCH for all nine public packages on `release/0.47`.
 It was published on npm `latest` on 2026-11-26 (UTC) from `v0.47.1`
 (`c4a2c39f0`) using exact-SHA release validation
@@ -146,7 +151,7 @@ published on 2026-11-14 (UTC). cloud-do left the release train at 0.43.0 (#1959)
 its existing npm versions are deprecated and receive no further releases or fixes.
 See the [release notes](../../docs/releases/v0.43.0.md)
 and [Host upgrade order](../../docs/releases/v0.43.0.md#host-upgrade-order).
-The registry read of 2026-11-26 (UTC) reports `latest` 0.47.1 for all nine packages.
+The registry read of 2026-11-28 (UTC) reports `latest` 0.47.1 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -161,10 +166,10 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From 0.28.2 all
 of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.47.1 for all nine packages on 2026-11-26 (UTC).
+the dist-tag `latest`, observed at 0.47.1 for all nine packages on 2026-11-28 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the historical 0.47.1 pre-publication baseline with prior `latest` 0.47.0 and
+records the 0.48.0 candidate baseline with prior `latest` 0.47.1 and
 `priorPublication: existing` for all nine packages, including
 `@byok-sdk/bot-collaboration`. Recheck registry state at each publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
