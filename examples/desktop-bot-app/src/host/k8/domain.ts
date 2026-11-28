@@ -2,6 +2,7 @@
 import path from 'node:path';
 import brand from '../../../brand.config.ts';
 import type { K8Methods } from '../../bridge/domains/k8.ts';
+import { agentHomesDir } from '../../recovery/stores.ts';
 import { executionCatalog } from '../conversation/catalog.ts';
 import { ConversationService } from '../conversation/service.ts';
 import type { HostDomain, HostContext } from '../domains.ts';
@@ -35,6 +36,7 @@ export async function createK8Domain(context: HostContext): Promise<HostDomain<K
   }
   const service = new ConversationService({
     conversation, store, server: context.server, brand, models: () => catalog.choices, changed: context.changed,
+    agentHomes: agentHomesDir(context),
   });
   const unsubscribe = context.profiles.subscribe(async profiles => {
     const next = executionCatalog(brand, deviceId, profiles);
@@ -62,6 +64,7 @@ export async function createK8Domain(context: HostContext): Promise<HostDomain<K
       'k8.clear': params => service.clear(params),
       'k8.cancel': params => service.cancel(params),
       'k8.answer': params => service.answer(params),
+      'k8.memory': params => service.memory(params),
     },
     close: async () => {
       unsubscribe();

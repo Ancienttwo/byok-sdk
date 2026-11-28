@@ -9,7 +9,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use byok_shell::{
-    BridgeClient, BridgeContract, BridgeErrorCode, FOREIGN_RUNTIME_VARIABLES, HostCommandSpec,
+    BridgeClient, BridgeContract, BridgeErrorCode, EXPECTED_BRIDGE_VERSION,
+    FOREIGN_RUNTIME_VARIABLES, HostCommandSpec,
     HostState, HostSupervisor, HostSupervisorConfig, KeepAwake, KeepAwakeBackend, KeepAwakeGuard,
     LinuxInhibitBackend, MaintenanceBusyError, MaintenanceLock, PowerError, QuitOutcome,
     SecretBytes, ShellRouter, SupervisedHostState, filter_env_pairs, list_from_custody,
@@ -341,7 +342,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     if (fs.existsSync(flag)) {{
       fs.unlinkSync(flag);
       setTimeout(() => process.exit(2), 180);
@@ -454,7 +455,7 @@ const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', line => {
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {
-    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 3 } }) + '\n');
     process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'stopped', pid: process.pid, reason: 'store_refused', storeRefused: true } }) + '\n');
     return;
   }
@@ -651,7 +652,7 @@ if (arg) {
   rl.on('line', line => {
     const msg = JSON.parse(line);
     if (msg.method === 'hello') {
-      process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+      process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 3 } }) + '\n');
       process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'running', pid: process.pid, activeWork: 0 } }) + '\n');
     } else if (msg.method === 'shutdown') {
       process.stdout.write(JSON.stringify({ id: msg.id, result: null }) + '\n');
@@ -698,7 +699,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     return;
   }}
   if (msg.method === 'shutdown') {{
@@ -804,7 +805,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'stopped', pid: process.pid, reason: 'halted', storeRefused: false }} }}) + '\n');
     return;
   }}
@@ -895,7 +896,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {
-    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 3 } }) + '\n');
     process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'running', pid: process.pid, activeWork: 0 } }) + '\n');
   } else if (msg.method === 'status') {
     process.stdout.write(JSON.stringify({ id: msg.id, result: { state: 'running', pid: process.pid, activeWork: 0 } }) + '\n');
@@ -911,7 +912,7 @@ setInterval(() => {}, 10000);
     let (done_tx, done_rx) = std::sync::mpsc::channel();
 
     let client = Arc::new(
-        BridgeClient::connect(child, 2, move |state| {
+        BridgeClient::connect(child, EXPECTED_BRIDGE_VERSION, move |state| {
             if matches!(state, HostState::Running { .. }) {
                 if let Some(c) = callback_slot.lock().unwrap().as_ref().cloned() {
                     let reply = c.call_raw("status", Value::Null);
@@ -940,7 +941,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {
-    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 3 } }) + '\n');
   } else if (msg.method === 'k8.view') {
     process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'running', pid: process.pid, activeWork: 1 } }) + '\n');
     process.stdout.write(JSON.stringify({ id: msg.id, result: { ok: true } }) + '\n');
@@ -957,7 +958,7 @@ rl.on('line', line => {
     let sync_cb_ref = Arc::clone(&sync_holder);
     let (rpc_tx, rpc_rx) = std::sync::mpsc::channel();
     let sync_client = Arc::new(
-        BridgeClient::connect(spawn_host_child(&spec_sync, &[]).unwrap(), 2, move |_| {
+        BridgeClient::connect(spawn_host_child(&spec_sync, &[]).unwrap(), EXPECTED_BRIDGE_VERSION, move |_| {
             let cli = sync_cb_ref.lock().unwrap().as_ref().cloned().unwrap();
             let _ = rpc_tx.send(cli.call_raw("status", Value::Null));
         })
@@ -989,7 +990,7 @@ const rl = readline.createInterface({{ input: process.stdin }});
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
   }} else if (msg.method === 'shutdown') {{
     process.stdout.write(JSON.stringify({reply_expr}) + '\n');
     process.exit(0);
@@ -1003,7 +1004,7 @@ rl.on('line', line => {{
                 &[],
             )
             .unwrap(),
-            2,
+            EXPECTED_BRIDGE_VERSION,
             |_| {},
         )
         .unwrap();
@@ -1035,7 +1036,7 @@ if (args[0] === 'byok-desktop-restore') {
   rl.on('line', line => {
     const msg = JSON.parse(line);
     if (msg.method === 'hello') {
-      process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+      process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 3 } }) + '\n');
       process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'stopped', pid: process.pid, reason: 'halted', storeRefused: false } }) + '\n');
     } else if (msg.method === 'shutdown') {
       process.stdout.write(JSON.stringify({ id: msg.id, result: null }) + '\n');
@@ -1189,7 +1190,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {
-    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 3 } }) + '\n');
     process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'running', pid: process.pid, activeWork: 0 } }) + '\n');
   }
 });
@@ -1461,7 +1462,7 @@ rl.on('close', () => {{
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     if (fs.existsSync(crashMarker)) {{
       pushState(1);
     }} else {{
@@ -1606,7 +1607,7 @@ rl.on('close', () => {{
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'running', pid: process.pid, activeWork: 0 }} }}) + '\n');
     return;
   }}
@@ -1710,7 +1711,7 @@ rl.on('close', () => {{
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'running', pid: process.pid, activeWork: 1 }} }}) + '\n');
     return;
   }}
@@ -1798,7 +1799,7 @@ rl.on('close', () => {{
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     if (fs.existsSync(crashMarker)) {{
       process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'running', pid: process.pid, activeWork: 0 }} }}) + '\n');
     }} else {{
@@ -1913,7 +1914,7 @@ rl.on('close', () => {{
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'running', pid: process.pid, activeWork: 0 }} }}) + '\n');
     return;
   }}
@@ -2053,7 +2054,7 @@ if (subcmd === {custody_cmd}) {{
   rl.on('line', line => {{
     const msg = JSON.parse(line);
     if (msg.method === 'hello') {{
-      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
       process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }} }}) + '\n');
     }} else if (msg.method === 'keys.profilesChanged') {{
       process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ ok: true }} }}) + '\n');
@@ -2500,7 +2501,7 @@ if (subcmd === {custody_cmd}) {{
   rl.on('line', line => {{
     const msg = JSON.parse(line);
     if (msg.method === 'hello') {{
-      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
       process.stdout.write(JSON.stringify({{
         event: 'state',
         state: {{ state: 'stopped', pid: process.pid, storeRefused: {store_refused}, reason: 'stopped' }},
@@ -2783,7 +2784,7 @@ if (subcmd === {restore_cmd}) {{
   rl.on('line', line => {{
     const msg = JSON.parse(line);
     if (msg.method === 'hello') {{
-      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
       process.stdout.write(JSON.stringify({{
         event: 'state',
         state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
@@ -2915,7 +2916,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{
       event: 'state',
       state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
@@ -3058,7 +3059,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{
       event: 'state',
       state: {{ state: 'running', pid: process.pid, activeWork: 0 }},

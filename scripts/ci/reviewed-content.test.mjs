@@ -829,6 +829,6 @@ test('new graph-registered private workspaces and matching lock rows are admitte
   assert.ok(selectImpact([`${desktop}/package.json`], f).dirs.includes(desktop));
   f.write(`${desktop}/package.json`, { ...app, devDependencies: { ...app.devDependencies, '@electron/fuses': '2.1.4' } });
   assert.throws(() => selectImpact([`${desktop}/package.json`], f), /reuse a base dependency spec \(@electron\/fuses\)/);
-  f.write(`${desktop}/package.json`, { ...app, dependencies: { ...edges, '@byok-sdk/protocol': 'workspace:*' } });
+  f.write(`${desktop}/package.json`, { ...app, dependencies: { ...edges, '@byok-sdk/cloud': 'workspace:*' } });
   assert.throws(() => selectImpact([`${desktop}/package.json`], f), /edges differ from reviewed graph/);
 });

@@ -33,6 +33,7 @@ fn embedded_bridge_contract_loads_and_matches_expected_versions() {
     assert!(!contract.is_main_method("keys.profilesChanged"));
     assert!(contract.allows_renderer_forwarded_host_method("status"));
     assert!(contract.allows_renderer_forwarded_host_method("k8.view"));
+    assert!(contract.allows_renderer_forwarded_host_method("k8.memory"));
     assert!(!contract.allows_renderer_forwarded_host_method("keys.submit"));
 
     for cmd in [
@@ -60,13 +61,13 @@ fn contract_parser_fails_closed_on_version_schema_and_invariant_drift() {
         })
     );
 
-    let wrong_bridge = valid.replace("\"bridgeVersion\": 2", "\"bridgeVersion\": 3");
+    let wrong_bridge = valid.replace("\"bridgeVersion\": 3", "\"bridgeVersion\": 4");
     assert_ne!(wrong_bridge, valid);
     assert_eq!(
         BridgeContract::parse_str(&wrong_bridge),
         Err(ContractError::UnsupportedBridgeVersion {
             expected: EXPECTED_BRIDGE_VERSION,
-            actual: 3,
+            actual: 4,
         })
     );
 

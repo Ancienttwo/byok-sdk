@@ -3,7 +3,7 @@
  * Methods are named `k8.<verb>`; the Host handlers live in `src/host/k8/domain.ts`.
  */
 import type { TurnCancelResult } from '@byok-sdk/bot-collaboration/host-kit';
-import type { ConversationSnapshot } from '../../host/conversation/types.ts';
+import type { BotMemory, ConversationSnapshot } from '../../host/conversation/types.ts';
 import type { BotProfile } from '../../host/store/types.ts';
 import type { BridgeDomain } from '../domain.ts';
 
@@ -19,10 +19,12 @@ export interface K8Methods {
   'k8.clear': { params: { actionId: string; botId: string }; result: null };
   'k8.cancel': { params: { turnId: string }; result: TurnCancelResult };
   'k8.answer': { params: { questionId: string; answer: string }; result: null };
+  /** One Bot's memory: `MEMORY.md` against its limit, its notes and its last dream. Read-only; an unknown Bot is refused. */
+  'k8.memory': { params: { botId: string }; result: BotMemory };
 }
 
 export const K8_DOMAIN = {
-  renderer: ['k8.view', 'k8.saveBot', 'k8.archiveBot', 'k8.send', 'k8.clear', 'k8.cancel', 'k8.answer'],
+  renderer: ['k8.view', 'k8.saveBot', 'k8.archiveBot', 'k8.send', 'k8.clear', 'k8.cancel', 'k8.answer', 'k8.memory'],
   main: [],
   shellToHost: [],
 } as const satisfies BridgeDomain<K8Methods>;

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +10,8 @@ import { createByokServer, listenLoopback, type ByokServer, type LoopbackListene
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { createBotPersonaProjection, type AgentMessageInput } from '@byok-sdk/bot-collaboration';
 import { ResultStubAdapter } from '@byok-sdk/bot-collaboration/testing';
+import { RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
+import { agentHomesDir } from '../../recovery/stores.ts';
 import { ConversationService } from '../conversation/service.ts';
 import { botViews, conversationItems, turnEnd } from '../conversation/view.ts';
 import { HostStore, StoreFormatError } from '../store/store.ts';
@@ -160,7 +162,7 @@ it('shows a failed Turn with the server\'s task reason, and marks a Pi backgroun
   const fx = await open();
   const changed = vi.fn();
   const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
-    brand: { roles: [] }, models: () => [{ id: 'default', label: 'Default' }], changed });
+    brand: { roles: [] }, agentHomes: agentHomesDir({ hostStorageRoot: fx.root }), models: () => [{ id: 'default', label: 'Default' }], changed });
   await service.saveBot(WRITER);
   // A command the view reads signals the Host's view change.
   expect(changed).toHaveBeenCalled();
@@ -193,7 +195,7 @@ it.each([
   const cancel = vi.spyOn(fx.conversation.bot, 'cancelTurn').mockResolvedValueOnce(result);
   const report = vi.spyOn(console, 'error').mockImplementation(() => {});
   const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
-    brand: { roles: [] }, models: () => [], changed });
+    brand: { roles: [] }, agentHomes: agentHomesDir({ hostStorageRoot: fx.root }), models: () => [], changed });
   try {
     const reply = await service.cancel({ turnId: result.turnId });
     expect(JSON.parse(JSON.stringify(reply))).toEqual({
@@ -212,13 +214,49 @@ it('returns the cancellation outcome without a warning when the drain succeeds',
   const cancel = vi.spyOn(fx.conversation.bot, 'cancelTurn').mockResolvedValueOnce(result);
   const report = vi.spyOn(console, 'error').mockImplementation(() => {});
   const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
-    brand: { roles: [] }, models: () => [], changed });
+    brand: { roles: [] }, agentHomes: agentHomesDir({ hostStorageRoot: fx.root }), models: () => [], changed });
   try {
     expect(await service.cancel({ turnId: result.turnId })).toEqual(result);
     expect(report).not.toHaveBeenCalled();
     expect(changed).toHaveBeenCalledOnce();
   } finally { service.close(); cancel.mockRestore(); report.mockRestore(); }
 });
+
+it('reads a Bot\'s memory files and last dream, and marks a MEMORY.md over the SDK limit', async () => {
+  const fx = await open(), homes = path.join(fx.root, 'homes'), home = path.join(homes, WRITER.id);
+  const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
+    brand: { roles: [] }, agentHomes: homes, models: () => [{ id: 'default', label: 'Default' }], changed: vi.fn() });
+  await service.saveBot(WRITER);
+  await mkdir(path.join(home, 'notes', 'people'), { recursive: true });
+  await writeFile(path.join(home, 'MEMORY.md'), 'm'.repeat(100));
+  await writeFile(path.join(home, 'notes', 'index.md'), 'n'.repeat(10));
+  await writeFile(path.join(home, 'notes', 'people', 'ada.md'), 'a'.repeat(20));
+  const at = Date.UTC(2026, 10, 27, 19);
+  const state = fx.conversation.bot.snapshot();
+  const snapshot = vi.spyOn(fx.conversation.bot, 'snapshot').mockReturnValue({ ...state, dreams: { open: {}, bots: {
+    [WRITER.id]: { since: at, last: { occurrenceKey: 'dream:writer:1@1', at, outcome: 'succeeded', template: 'cheap', fallback: true } },
+  } } });
+  try {
+    expect(await service.memory({ botId: WRITER.id })).toEqual({
+      resident: { byteCount: 100, limitBytes: RESIDENT_MEMORY_MAX_BYTES, overLimit: false }, notes: { count: 2, bytes: 30 },
+      lastDream: { outcome: 'succeeded', template: 'cheap', fallback: true, at: '2026-11-27T19:00:00.000Z' }, nextDream: null,
+    });
+    await writeFile(path.join(home, 'MEMORY.md'), 'm'.repeat(RESIDENT_MEMORY_MAX_BYTES + 1));
+    expect((await service.memory({ botId: WRITER.id })).resident)
+      .toEqual({ byteCount: RESIDENT_MEMORY_MAX_BYTES + 1, limitBytes: RESIDENT_MEMORY_MAX_BYTES, overLimit: true });
+  } finally { service.close(); snapshot.mockRestore(); }
+}, 30_000);
+
+it('answers a Bot without a home or a dream as unavailable, and refuses an unknown Bot', async () => {
+  const fx = await open();
+  const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
+    brand: { roles: [] }, agentHomes: path.join(fx.root, 'homes'), models: () => [{ id: 'default', label: 'Default' }], changed: vi.fn() });
+  try {
+    await service.saveBot(WRITER);
+    expect(await service.memory({ botId: WRITER.id })).toEqual({ resident: null, notes: null, lastDream: null, nextDream: null });
+    await expect(service.memory({ botId: 'nobody' })).rejects.toThrow('Unknown Bot nobody');
+  } finally { service.close(); }
+}, 30_000);
 
 it('places drafts, questions, outcome-less and cancelled Turns, folds above the clear, and derives each rail state', () => {
   const turn = (id: string, fields: Record<string, unknown> = {}) => ({ id, root: id, botId: 'b', source: 'user', request: '', hop: 0, status: 'processing', ...fields }) as never;

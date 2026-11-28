@@ -591,6 +591,10 @@ describe('desktop bridge', () => {
     const contract = buildBridgeContract();
     expect(committed).toBe(`${JSON.stringify(contract, null, 2)}\n`);
     expect(contract.schemaVersion).toBe(2);
+    expect(contract.bridgeVersion).toBe(3);
+    expect(contract.rendererMethods).toContain('k8.memory');
+    expect(contract.hostMethods).toContain('k8.memory');
+    expect(contract.mainMethods).not.toContain('k8.memory');
     expect(contract.shellToHostMethods).toEqual(['keys.profilesChanged']);
     expect(contract.hostMethods).toContain('keys.profilesChanged');
     expect(contract.rendererMethods).not.toContain('keys.profilesChanged');

@@ -4,6 +4,7 @@ import type { BotProfile } from "../../../../src/host/store/types.ts";
 import { toBridgeCallError } from "../../bridge.ts";
 import { hostReady, k8View, reloadK8View, selectBot, selectedBotId } from "../../store.ts";
 import { Button, Spinner } from "../../ui/index.ts";
+import { BotMemorySummary } from "./BotMemoryPanel.tsx";
 import { BotRail } from "./BotRail.tsx";
 import { Composer } from "./Composer.tsx";
 import { ProfileEditor } from "./ProfileEditor.tsx";
@@ -132,6 +133,7 @@ export function ConversationScreen() {
                           </Button>
                         </If>
                       </View>
+                      <BotMemorySummary botId={selected().id} />
                       <If when={selected().archived}>
                         <Text class="text-xs text-muted-foreground">
                           This Bot is archived. Archiving is permanent; its conversation stays readable.

@@ -469,7 +469,7 @@ if (subcmd === {custody_cmd}) {{
   rl.on('line', line => {{
     const msg = JSON.parse(line);
     if (msg.method === 'hello') {{
-      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
       process.stdout.write(JSON.stringify({{
         event: 'state',
         state: {{ state: 'stopped', pid: process.pid, storeRefused: {store_refused}, reason: 'stopped' }},
@@ -808,7 +808,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{
       event: 'state',
       state: {{ state: 'stopped', pid: process.pid, storeRefused: {store_refused}, reason: 'stopped' }},
@@ -1105,7 +1105,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{
       event: 'state',
       state: {{ state: 'stopped', pid: process.pid, storeRefused: {store_refused}, reason: 'stopped' }},
@@ -1383,7 +1383,7 @@ if (subcmd === {restore_cmd}) {{
   rl.on('line', line => {{
     const msg = JSON.parse(line);
     if (msg.method === 'hello') {{
-      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
       process.stdout.write(JSON.stringify({{
         event: 'state',
         state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
@@ -1659,7 +1659,7 @@ if (subcmd === {restore_cmd}) {{
   rl.on('line', line => {{
     const msg = JSON.parse(line);
     if (msg.method === 'hello') {{
-      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
       process.stdout.write(JSON.stringify({{
         event: 'state',
         state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
@@ -1779,7 +1779,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{
       event: 'state',
       state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
@@ -1911,7 +1911,7 @@ rl.on('close', () => process.exit(0));
 rl.on('line', line => {{
   const msg = JSON.parse(line);
   if (msg.method === 'hello') {{
-    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 3 }} }}) + '\n');
     process.stdout.write(JSON.stringify({{
       event: 'state',
       state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},

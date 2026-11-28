@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "bridgeVersion": 2,
+  "bridgeVersion": 3,
   "ipcChannel": "byok:bridge",
   "stateHintChannel": "byok:state-changed",
   "coreMethods": [
@@ -17,6 +17,7 @@
     "k8.clear",
     "k8.cancel",
     "k8.answer",
+    "k8.memory",
     "activity.cards",
     "activity.card",
     "activity.approve",
@@ -50,6 +51,7 @@
     "k8.clear",
     "k8.cancel",
     "k8.answer",
+    "k8.memory",
     "activity.cards",
     "activity.card",
     "activity.approve",
