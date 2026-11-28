@@ -11,6 +11,7 @@ import {
   InMemorySecretStore, LinuxSecretServiceSecretStore, ProviderRegistry, modelProviderSecretName, SqliteProviderProfileStore,
   type ModelProviderSecretName, type ProviderConfiguration, type SecretStore,
 } from '@byok-sdk/keys';
+import type { RuntimeAdapter } from '@byok-sdk/client';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { executionCatalog } from '../host/conversation/catalog.ts';
 import { catalogEntryFor, ProviderProfiles } from '../host/keys/catalog.ts';
@@ -98,14 +99,18 @@ describe('custody child', () => {
       selection: { mode: 'byok-profile', providerProfile: { profileRef: 'writer', profileRevision: status.profile_revision, profileHash: status.profile_hash,
         requiredCapabilities: [] } },
     });
-    // K8's catalog: the brand entries, then one pinned Pi entry per profile Pi can launch; nothing for a profile without pi_model.
+    // K8's catalog: the composed runtimes, then one pinned Pi entry per profile Pi can launch; nothing for a profile without
+    // pi_model, and none at all without the Pi adapter.
     const { pi_model: _piModel, ...withoutPi } = profile!;
-    const catalog = executionCatalog({ instruction: 'reply', models: { pi: { label: 'Pi', runtime: 'pi' } } }, 'device',
-      [profile!, { ...withoutPi, profile_ref: 'no-pi' }]);
-    expect(catalog.choices).toEqual([{ id: 'pi', label: 'Pi' }, { id: 'pi:writer', label: 'Writer model' }]);
+    const pi = { descriptor: { id: 'pi', selectionModes: ['device-default'], capabilities: { mcpToolsets: true } } } as unknown as Pick<RuntimeAdapter, 'descriptor'>;
+    const claude = { descriptor: { id: 'claude', selectionModes: ['device-default'], capabilities: {} } } as unknown as Pick<RuntimeAdapter, 'descriptor'>;
+    const brand = { instruction: 'reply', models: { pi: { label: 'Pi' } } };
+    const catalog = executionCatalog(brand, 'device', [pi], [profile!, { ...withoutPi, profile_ref: 'no-pi' }]);
+    expect(catalog.choices).toEqual([{ id: 'pi', label: 'Pi', runtime: 'pi', mcpToolsets: true }, { id: 'pi:writer', label: 'Writer model', runtime: 'pi', mcpToolsets: true }]);
     expect(catalog.models['pi:writer']).toEqual(catalogEntryFor(profile!, catalog.models.pi!));
-    expect(() => executionCatalog({ instruction: 'reply', models: { 'pi:writer': { label: 'Brand', runtime: 'pi' } } }, 'device', [profile!]))
-      .toThrow('brand.config.ts model pi:writer collides with the keys profile writer');
+    expect(executionCatalog(brand, 'device', [claude], [profile!]).choices.map(choice => choice.id)).toEqual(['claude']);
+    const colliding = { descriptor: { ...pi.descriptor, id: 'pi:writer' } } as unknown as Pick<RuntimeAdapter, 'descriptor'>;
+    expect(() => executionCatalog(brand, 'device', [pi, colliding], [profile!])).toThrow('Runtime pi:writer collides with the keys profile writer');
     // A store that is neither absent nor accepted refuses with the store's own reason.
     await expect(new ProviderProfiles(root).load()).rejects.toThrow(`Keys store ${root} is rejected: The store path is not a regular file`);
     const rotated = await submitToCustody(custodyChild(secrets, receipts), { op: 'replace_secret', profileRef: 'writer', secret: `${SECRET}-2` });
@@ -210,9 +215,10 @@ describe('custody child', () => {
     const secrets = new InMemorySecretStore<ModelProviderSecretName>();
     const write = observeCredentialWrites(secrets);
     const profiles = new ProviderProfiles(keysDb);
-    const brand = { instruction: 'reply', models: { pi: { label: 'Pi', runtime: 'pi' as const } } };
-    let catalog = executionCatalog(brand, 'device', await profiles.load());
-    profiles.subscribe(next => { catalog = executionCatalog(brand, 'device', next); });
+    const brand = { instruction: 'reply', models: { pi: { label: 'Pi' } } };
+    const adapters = [{ descriptor: { id: 'pi', selectionModes: ['device-default'], capabilities: {} } }] as unknown as Pick<RuntimeAdapter, 'descriptor'>[];
+    let catalog = executionCatalog(brand, 'device', adapters, await profiles.load());
+    profiles.subscribe(next => { catalog = executionCatalog(brand, 'device', adapters, next); });
     const lost = custodyChild(secrets, []);
     vi.spyOn(lost.stdout as PassThrough, 'end').mockReturnValue(lost.stdout as PassThrough);
     const committed = new Promise<void>(resolve => lost.once('exit', () => resolve()));

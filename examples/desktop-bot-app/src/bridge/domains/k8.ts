@@ -8,7 +8,7 @@ import type { BotProfile } from '../../host/store/types.ts';
 import type { BridgeDomain } from '../domain.ts';
 
 export interface K8Methods {
-  /** The rail, the brand's roles and models, and the selected Bot's conversation. */
+  /** The rail, the brand's roles, the model choices with each one's runtime, and the selected Bot's conversation. */
   'k8.view': { params: { botId: string | null }; result: ConversationSnapshot };
   /** Creates (under a renderer-made id, reused on retry) or edits a Bot. */
   'k8.saveBot': { params: BotProfile; result: null };

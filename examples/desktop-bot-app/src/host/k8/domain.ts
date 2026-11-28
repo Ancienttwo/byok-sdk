@@ -12,7 +12,8 @@ import { Conversation } from './conversation.ts';
 
 /**
  * Opens the Host store and the K8 conversation on this device's catalog, then binds the server's consumers to it. The
- * catalog takes the keys profiles read at Host start and is rebuilt on every custody receipt (`ProviderProfiles`).
+ * catalog takes the Host's composed runtime adapters and the keys profiles read at Host start, and is rebuilt on every
+ * custody receipt (`ProviderProfiles`).
  * Closing closes the conversation (and its K8 ledger) before the store; the daemon stops after every domain closed.
  */
 export async function createK8Domain(context: HostContext): Promise<HostDomain<K8Methods>> {
@@ -23,7 +24,7 @@ export async function createK8Domain(context: HostContext): Promise<HostDomain<K
   let catalog: ReturnType<typeof executionCatalog>;
   let conversation: Conversation;
   try {
-    catalog = executionCatalog(brand, deviceId, await context.profiles.load());
+    catalog = executionCatalog(brand, deviceId, context.adapters, await context.profiles.load());
     // The dreaming setting applies from this start on; a damaged settings file stops the Host here.
     const settings = await settingsStore(settingsFile(context.hostStorageRoot)).read();
     conversation = await Conversation.open({
@@ -39,7 +40,7 @@ export async function createK8Domain(context: HostContext): Promise<HostDomain<K
     agentHomes: agentHomesDir(context),
   });
   const unsubscribe = context.profiles.subscribe(async profiles => {
-    const next = executionCatalog(brand, deviceId, profiles);
+    const next = executionCatalog(brand, deviceId, context.adapters, profiles);
     await conversation.setModels(next.models);
     catalog = next;
     service.changed();

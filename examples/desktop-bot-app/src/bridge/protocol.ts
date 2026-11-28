@@ -19,7 +19,7 @@ import { KEYS_DOMAIN, type KeysMethods } from './domains/keys.ts';
 import { SETTINGS_DOMAIN, type SettingsMethods } from './domains/settings.ts';
 import { SHELL_DOMAIN, type ShellMethods } from './domains/shell.ts';
 
-export const BRIDGE_VERSION = 4;
+export const BRIDGE_VERSION = 5;
 
 /** The ipcRenderer.invoke channel the preload forwards renderer calls on. */
 export const BRIDGE_IPC_CHANNEL = 'byok:bridge';

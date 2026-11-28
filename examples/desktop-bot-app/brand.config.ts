@@ -19,11 +19,11 @@ const brand: BrandConfig = {
     { id: 'writer', label: 'Writer', role: 'Writes and edits text', persona: 'Clear, short sentences. Ask when the audience is unclear.' },
     { id: 'researcher', label: 'Researcher', role: 'Finds and compares information', persona: 'State sources and uncertainty. Separate facts from opinions.' },
   ],
-  // The first entry is the default for new Bots.
+  // Picker order and labels by runtime id; the Host's composed adapters decide which exist, the first one here is the default.
   models: {
-    pi: { label: 'Pi', runtime: 'pi' },
-    claude: { label: 'Claude Code', runtime: 'claude' },
-    codex: { label: 'Codex', runtime: 'codex' },
+    pi: { label: 'Pi' },
+    claude: { label: 'Claude Code' },
+    codex: { label: 'Codex' },
   },
 };
 

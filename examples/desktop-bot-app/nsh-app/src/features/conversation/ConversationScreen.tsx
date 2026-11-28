@@ -35,10 +35,11 @@ export function ConversationScreen() {
     const current = snapshot()?.conversation;
     return current !== undefined && current.botId === selectedBotId() ? current : undefined;
   };
-  const startNew = (role: RolePreset, model: string) =>
+  // The editor picks the first selectable model once it has read the runtimes' availability.
+  const startNew = (role: RolePreset) =>
     editing.set({
       creating: true,
-      profile: { id: crypto.randomUUID(), name: role.label, role: role.role, persona: role.persona, model },
+      profile: { id: crypto.randomUUID(), name: role.label, role: role.role, persona: role.persona, model: "" },
     });
   return (
     <View testID="conversation-section" class="gap-4">
@@ -69,12 +70,11 @@ export function ConversationScreen() {
               bots={loaded().bots}
               roles={loaded().roles}
               selected={selectedBotId()}
-              canCreate={loaded().models.length > 0}
               onSelect={(id) => {
                 editing.set(null);
                 selectBot(id);
               }}
-              onNew={(role) => startNew(role, loaded().models[0].id)}
+              onNew={startNew}
             />
             <View class="flex-1 gap-4">
               <Each of={editingEntries()} key={(entry) => entry.profile.id}>

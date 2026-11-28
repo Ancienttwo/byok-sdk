@@ -1,11 +1,26 @@
 import { describe, expect, open, test } from "nsh/test";
 import type { BotMemory, ConversationSnapshot } from "../../../../src/host/conversation/types.ts";
 import type { BotView, ConversationItem } from "../../../../src/host/conversation/view.ts";
+import type { DeviceView, RuntimeView } from "../../../../src/host/settings/types.ts";
 
 type Call = { method: string; params: any };
 
 const ROLES = [{ id: "writer", label: "Writer", role: "Writes and edits text", persona: "Clear, short sentences." }];
-const MODELS = [{ id: "zai-chat", label: "ZAI Chat" }];
+const MODELS = [{ id: "zai-chat", label: "ZAI Chat", runtime: "pi", mcpToolsets: true }];
+
+function device(runtimes: readonly RuntimeView[]): DeviceView {
+  return {
+    paired: true,
+    deviceId: "dev-1",
+    lifecycle: { phase: "running", connection: "open" },
+    activeTaskCount: 0,
+    pendingTerminalCommits: 0,
+    runtimes,
+    clockSkew: { status: "unknown", reason: "not-observed" },
+    doctor: { generatedAt: "2026-11-28T00:00:00.000Z", worst: "pass", checks: [] },
+  };
+}
+const PI_READY: RuntimeView = { id: "pi", present: true, outcome: "available", version: "1.3.0", verdict: "allow" };
 
 function bot(id: string, overrides: Partial<BotView> = {}): BotView {
   return { id, name: `Bot ${id}`, role: "Writes", persona: "Short.", model: "zai-chat", archived: false, state: "idle", ...overrides };
@@ -33,8 +48,8 @@ const MEMORY: BotMemory = {
 };
 
 /**
- * A started shell whose Host runs; `view` answers `k8.view`, `memory` `k8.memory`, `command` the other k8 methods (null by
- * default).
+ * A started shell whose Host runs; `view` answers `k8.view`, `memory` `k8.memory`, `readDevice` `settings.device` (Pi ready
+ * by default), `command` the other k8 methods (null by default).
  * Every bridge call lands in `calls`.
  */
 function conversationShell(
@@ -42,6 +57,7 @@ function conversationShell(
   view: (params: { botId: string | null }) => unknown,
   command: (method: string, params: any) => unknown = () => null,
   memory: (params: { botId: string }) => unknown = () => MEMORY,
+  readDevice: (params: any) => DeviceView = () => device([PI_READY]),
 ) {
   return {
     "byok-nsh-adapter": {
@@ -51,6 +67,7 @@ function conversationShell(
         if (method === "keys.list") return [];
         if (method === "k8.view") return view(params);
         if (method === "k8.memory") return memory(params);
+        if (method === "settings.device") return readDevice(params);
         return command(method, params);
       },
     },
@@ -681,5 +698,100 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     await app.waitFor("id:conv-memory-resident");
     expect(app.texts().filter((text) => text === "Unavailable").length).toBe(3);
     expect(app.shows("text:No dream yet")).toBe(true);
+  });
+
+  describe("Bot picker availability (#2546)", () => {
+    const PICKER_MODELS = [
+      { id: "codex", label: "Codex", runtime: "codex", mcpToolsets: true },
+      { id: "claude", label: "Claude Code", runtime: "claude", mcpToolsets: true },
+      { id: "grok", label: "grok", runtime: "grok", mcpToolsets: false },
+      { id: "pi", label: "Pi", runtime: "pi", mcpToolsets: true },
+    ];
+    const pickerSnapshot = (bots: readonly BotView[]) => ({ ...snapshot(bots), models: PICKER_MODELS });
+    const item = (app: Awaited<ReturnType<typeof openConversation>>, title: string) => app.accessibility(`label:${title}`);
+
+    test("a new Bot starts on the first selectable model: a blocked version is not selectable, a sign-out and an unchecked login are", async () => {
+      const calls: Call[] = [];
+      const app = await openConversation(
+        conversationShell(calls, () => pickerSnapshot([]), () => null, () => MEMORY, () =>
+          device([
+            { id: "codex", present: true, outcome: "available", version: "0.1.0", verdict: "block", authPresent: true },
+            { id: "claude", present: true, outcome: "available", version: "2.0.0", verdict: "allow", authPresent: false },
+            { id: "pi", present: true, outcome: "available", version: "1.3.0", verdict: "allow" },
+          ]),
+        ),
+      );
+      await app.press("id:conv-new-by-role");
+      await app.press("id:conv-new-writer");
+      // The picker's trigger shows the chosen model's title.
+      await app.waitFor("text:Claude Code · ○ signed out");
+      await app.waitFor("id:conv-profile-model-signin");
+      expect(app.accessibility("id:conv-profile-model-status-badge")?.label).toBe("signed out");
+      expect(app.shows("text:claude auth login: Run this command in a terminal, then press Check again.")).toBe(true);
+      await app.press("id:conv-profile-model");
+      expect(item(app, "Codex · ✕ version blocked")?.disabled).toBe(true);
+      expect(item(app, "grok · ? not checked")?.disabled).toBe(true);
+      expect(item(app, "Pi · ? not checked")?.disabled).toBe(false);
+      await app.press("label:Pi · ? not checked");
+      expect(app.shows("id:conv-profile-model-status")).toBe(false);
+      await app.press("id:conv-profile-save");
+      await app.waitFor("id:conv-profile", { state: "gone" });
+      expect(calls.find((call) => call.method === "k8.saveBot")?.params).toMatchObject({ model: "pi" });
+    });
+
+    test("with no selectable model a new Bot cannot save, and the picker offers Check again and the Pi key setup", async () => {
+      const calls: Call[] = [];
+      const app = await openConversation(
+        conversationShell(calls, () => pickerSnapshot([]), () => null, () => MEMORY, () =>
+          device([{ id: "pi", present: false, outcome: "not-found" }]),
+        ),
+      );
+      await app.press("id:conv-new-by-role");
+      await app.press("id:conv-new-writer");
+      await app.waitFor("id:conv-profile-no-agent");
+      expect(app.shows("text:Select an option")).toBe(true);
+      expect(app.accessibility("id:conv-profile-save")?.disabled).toBe(true);
+      await app.press("id:conv-profile-check-again");
+      await app.waitUntil(() => calls.some((call) => call.method === "settings.device" && call.params?.checkAuth === true));
+      await app.press("id:conv-profile-setup-pi");
+      await app.waitFor("id:conversation-section", { state: "gone" });
+      expect(app.accessibility("id:nav-keys")?.selected).toBe(true);
+    });
+
+    test("a saved Bot whose runtime check timed out keeps its model and saves it; Check again recovers it without a new Bot", async () => {
+      const calls: Call[] = [];
+      let timedOut = true;
+      const app = await openConversation(
+        conversationShell(
+          calls,
+          (params) => ({ ...pickerSnapshot([bot("a", { model: "codex" })]), ...(params.botId === null ? {} : { conversation: { botId: params.botId, items: [], cancellable: [] } }) }),
+          () => null,
+          () => MEMORY,
+          () =>
+            device([
+              timedOut
+                ? { id: "codex", present: false, outcome: "timeout" }
+                : { id: "codex", present: true, outcome: "available", version: "0.9.0", verdict: "allow", authPresent: true },
+              PI_READY,
+            ]),
+        ),
+      );
+      await app.press("id:conv-bot-a");
+      await app.press("id:conv-edit-profile");
+      await app.waitFor("id:conv-profile-model-status");
+      expect(app.accessibility("id:conv-profile-model-status-badge")?.label).toBe("check timed out");
+      expect(app.shows("text:Codex · ◷ check timed out")).toBe(true);
+      expect(app.accessibility("id:conv-profile-save")?.disabled).toBe(false);
+      timedOut = false;
+      await app.press("id:conv-profile-check-again");
+      await app.waitFor("id:conv-profile-model-status", { state: "gone" });
+      expect(app.shows("text:Codex")).toBe(true);
+      await app.press("id:conv-profile-save");
+      await app.waitFor("id:conv-profile", { state: "gone" });
+      expect(calls.filter((call) => call.method === "k8.saveBot").map((call) => call.params)).toEqual([
+        { id: "a", name: "Bot a", role: "Writes", persona: "Short.", model: "codex" },
+      ]);
+      expect(calls.filter((call) => call.method === "settings.device").map((call) => call.params ?? null)).toEqual([null, { checkAuth: true }]);
+    });
   });
 });

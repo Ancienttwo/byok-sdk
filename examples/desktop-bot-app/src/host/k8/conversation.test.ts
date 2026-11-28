@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createDaemonWithAdapters, type AgentEgressPolicy, type Daemon } from '@byok-sdk/client';
+import { createDaemonWithAdapters, type AgentEgressPolicy, type Daemon, type RuntimeAdapter } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { createByokServer, listenLoopback, type ByokServer, type LoopbackListener } from '@byok-sdk/server';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
@@ -12,6 +12,7 @@ import { createBotPersonaProjection, type AgentMessageInput } from '@byok-sdk/bo
 import { ResultStubAdapter } from '@byok-sdk/bot-collaboration/testing';
 import { RESIDENT_MEMORY_MAX_BYTES } from '@byok-sdk/protocol/constants';
 import { agentHomesDir } from '../../recovery/stores.ts';
+import { executionCatalog } from '../conversation/catalog.ts';
 import { ConversationService } from '../conversation/service.ts';
 import { botViews, conversationItems, turnEnd } from '../conversation/view.ts';
 import { HostStore, StoreFormatError } from '../store/store.ts';
@@ -162,7 +163,7 @@ it('shows a failed Turn with the server\'s task reason, and marks a Pi backgroun
   const fx = await open();
   const changed = vi.fn();
   const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
-    brand: { roles: [] }, agentHomes: agentHomesDir({ hostStorageRoot: fx.root }), models: () => [{ id: 'default', label: 'Default' }], changed });
+    brand: { roles: [] }, agentHomes: agentHomesDir({ hostStorageRoot: fx.root }), models: () => [{ id: 'default', label: 'Default', runtime: 'pi', mcpToolsets: false }], changed });
   await service.saveBot(WRITER);
   // A command the view reads signals the Host's view change.
   expect(changed).toHaveBeenCalled();
@@ -225,7 +226,7 @@ it('returns the cancellation outcome without a warning when the drain succeeds',
 it('reads a Bot\'s memory files and last dream, and marks a MEMORY.md over the SDK limit', async () => {
   const fx = await open(), homes = path.join(fx.root, 'homes'), home = path.join(homes, WRITER.id);
   const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
-    brand: { roles: [] }, agentHomes: homes, models: () => [{ id: 'default', label: 'Default' }], changed: vi.fn() });
+    brand: { roles: [] }, agentHomes: homes, models: () => [{ id: 'default', label: 'Default', runtime: 'pi', mcpToolsets: false }], changed: vi.fn() });
   await service.saveBot(WRITER);
   await mkdir(path.join(home, 'notes', 'people'), { recursive: true });
   await writeFile(path.join(home, 'MEMORY.md'), 'm'.repeat(100));
@@ -250,7 +251,7 @@ it('reads a Bot\'s memory files and last dream, and marks a MEMORY.md over the S
 it('answers a Bot without a home or a dream as unavailable, and refuses an unknown Bot', async () => {
   const fx = await open();
   const service = new ConversationService({ conversation: fx.conversation, store: fx.store, server: fx.server,
-    brand: { roles: [] }, agentHomes: path.join(fx.root, 'homes'), models: () => [{ id: 'default', label: 'Default' }], changed: vi.fn() });
+    brand: { roles: [] }, agentHomes: path.join(fx.root, 'homes'), models: () => [{ id: 'default', label: 'Default', runtime: 'pi', mcpToolsets: false }], changed: vi.fn() });
   try {
     await service.saveBot(WRITER);
     expect(await service.memory({ botId: WRITER.id })).toEqual({ resident: null, notes: null, lastDream: null, nextDream: null });
@@ -313,6 +314,34 @@ it('refuses a created or re-pointed Bot whose model is not in the catalog before
   await refused(fx, { ...WRITER, model: 'missing' }, /Unavailable model: missing/);
   await fx.conversation.saveBot(WRITER);
   await refused(fx, { ...WRITER, model: 'missing' }, /Unavailable model: missing/);
+});
+
+/** A composed adapter as the catalog reads it: its frozen descriptor's id, selection modes and `mcpToolsets`. */
+const composed = (id: string, selectionModes: string[], mcpToolsets?: boolean) =>
+  ({ descriptor: { id, selectionModes, capabilities: mcpToolsets === undefined ? {} : { mcpToolsets } } }) as unknown as Pick<RuntimeAdapter, 'descriptor'>;
+const BRAND = { instruction: 'reply', models: { pi: { label: 'Pi' }, claude: { label: 'Claude Code' }, codex: { label: 'Codex' } } };
+
+// Detection is no input: a composed runtime that is missing, signed out or version-blocked keeps its template (#2546).
+it.each([
+  ['orders branded runtimes first, then unbranded ones in composition order, and leaves out one without device-default', BRAND,
+    [composed('grok', ['device-default']), composed('codex', ['device-default'], false), composed('agy', ['byok'], true),
+      composed('claude', ['device-default'], true), composed('pi', ['device-default'], true)],
+    [{ id: 'pi', label: 'Pi', runtime: 'pi', mcpToolsets: true }, { id: 'claude', label: 'Claude Code', runtime: 'claude', mcpToolsets: true },
+      { id: 'codex', label: 'Codex', runtime: 'codex', mcpToolsets: false }, { id: 'grok', label: 'grok', runtime: 'grok', mcpToolsets: false }]],
+  ['defaults to the first composed runtime in brand order, skipping a branded one the Host did not compose',
+    { instruction: 'reply', models: { codex: { label: 'Codex' }, claude: { label: 'Claude Code' } } },
+    [composed('pi', ['device-default']), composed('claude', ['device-default'])],
+    [{ id: 'claude', label: 'Claude Code', runtime: 'claude', mcpToolsets: false }, { id: 'pi', label: 'pi', runtime: 'pi', mcpToolsets: false }]],
+])('catalog: %s', (_label, brand, adapters, choices) => {
+  const catalog = executionCatalog(brand, 'device', adapters, []);
+  expect(catalog.choices).toEqual(choices);
+  expect(Object.keys(catalog.models)).toEqual(choices.map(choice => choice.id));
+  expect(catalog.execution.payload.target).toEqual({ lane: 'harness', harnessId: choices[0]!.runtime, selection: { mode: 'device-default' } });
+});
+
+it('catalog: refuses a Host whose composed adapters take no device-default selection', () => {
+  expect(() => executionCatalog(BRAND, 'device', [composed('agy', ['byok'])], []))
+    .toThrow('The Host composed no runtime adapter that takes a device-default selection');
 });
 
 it.each([
