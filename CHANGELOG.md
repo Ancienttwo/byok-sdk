@@ -4,8 +4,9 @@
 
 - **Added (client, #2514).** Opt in to `CursorAdapter` on macOS and Linux with a user-installed Cursor Agent CLI and `cursor-agent login`. Phase 1 includes fake-CLI contract coverage. [Host setup](docs/releases/host-upgrade-next-minor.md#cursor-agent-cli-2514)
 
-- **Breaking (client, keys, #2522).** The official Pi closure moves to 1.6.1. Re-prepare Pi inputs before dispatch and replace model IDs removed from the pinned catalog. Existing durable SQLite replicas open in place. [Host steps](docs/releases/host-upgrade-next-minor.md#pi-161-closure)
-- **Changed (client, #2521).** The client vendors OAR 0.138.1 and qualifies Antigravity CLI 1.5.18. `AgyAdapter.accountUsage()` requires `{ allowPrintMode: true }` to run its quota commands. agy subprocesses use `AGY_CLI_DISABLE_AUTO_UPDATE=true`. [Host steps](docs/releases/host-upgrade-next-minor.md#oar-01381-2521)
+- **Breaking (client, keys, #2522, #2585).** The official Pi closure moves to 1.7.0. Re-prepare Pi inputs, rebind Host accounting rulings, and replace model IDs removed from the pinned catalog. Existing durable SQLite replicas open in place. [Host steps](docs/releases/host-upgrade-next-minor.md#pi-170-closure-2585)
+- **Changed (client, #2585).** The client vendors OAR 0.140.0. The SDK keeps its own Pi launcher and RPC client.
+- **Changed (client, #2521).** Antigravity CLI 1.5.18 is qualified. `AgyAdapter.accountUsage()` requires `{ allowPrintMode: true }` to run its quota commands. agy subprocesses use `AGY_CLI_DISABLE_AUTO_UPDATE=true`. [Host steps](docs/releases/host-upgrade-next-minor.md#oar-01381-2521)
 - **Fixed (client, #2521).** Codex secret answers are scrubbed from the matching native output before SDK recording and projection.
 - **Added (client, #2524).** Hosts can check installed runtime versions offline against OAR's suggested minimums for recent models. Hosts control any live manifest refresh. [Host steps](docs/releases/host-upgrade-next-minor.md#suggested-runtime-versions-2524)
 - **Added (client, protocol, #2523).** Hosts can select a Codex or Claude service tier and authorize default-tier fallback on wire v8. Both adapters verify the applied tier before dispatching the prompt and report it in task activity. [Host steps](docs/releases/host-upgrade-next-minor.md#host-selected-service-tier-2523)

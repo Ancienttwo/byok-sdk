@@ -754,7 +754,7 @@ export type PiCatalogLookup = {
 };
 export declare function piModelConfigFromPinnedCatalog(selection: PiCatalogSelection): PiCatalogLookup;
 // ==== @byok-sdk/keys dist/pi-model-catalog.generated.d.ts ====
-export declare const PI_MODEL_CATALOG_PI_AI_VERSION = "1.6.1";
+export declare const PI_MODEL_CATALOG_PI_AI_VERSION = "1.7.0";
 export declare const PI_THINKING_LEVELS: readonly ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 // ==== @byok-sdk/keys dist/pi-model-config.d.ts ====
 import { z } from 'zod';

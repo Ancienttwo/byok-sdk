@@ -202,16 +202,16 @@ assert.deepEqual(PI_DIRECT_CLOSURE, PI_DIRECT);
 const exactClosure = (version) => Object.fromEntries(PI_DIRECT.map((name) => [name, version]));
 
 test('the Pi runtime identity authority admits only an exact official closure', () => {
-  assert.deepEqual(parsePiRuntimeIdentity({ dependencies: exactClosure('1.6.1') }), {
+  assert.deepEqual(parsePiRuntimeIdentity({ dependencies: exactClosure('1.7.0') }), {
     specifier: PI_DEPENDENCY_SPECIFIER,
-    spec: '1.6.1',
+    spec: '1.7.0',
     packageName: PI_DEPENDENCY_SPECIFIER,
-    version: '1.6.1',
+    version: '1.7.0',
     closure: PI_RUNTIME_CLOSURE,
   });
-  for (const rejected of ['npm:@byok-sdk/pi-coding-agent@0.86.1001', 'npm:@earendil-works/pi-coding-agent@1.6.1', '^1.6.1', '0.99', 'latest', '']) {
+  for (const rejected of ['npm:@byok-sdk/pi-coding-agent@0.86.1001', 'npm:@earendil-works/pi-coding-agent@1.7.0', '^1.7.0', '0.99', 'latest', '']) {
     assert.throws(
-      () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('1.6.1'), [PI_DEPENDENCY_SPECIFIER]: rejected } }),
+      () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('1.7.0'), [PI_DEPENDENCY_SPECIFIER]: rejected } }),
       /must be pinned to one exact official x\.y\.z version/,
       `${rejected} must be rejected`,
     );
@@ -219,16 +219,16 @@ test('the Pi runtime identity authority admits only an exact official closure', 
   assert.throws(() => parsePiRuntimeIdentity({ dependencies: {} }), /must be a required dependency/);
   for (const name of PI_INDIRECT) {
     assert.throws(
-      () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('1.6.1'), [name]: '1.6.1' } }),
+      () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('1.7.0'), [name]: '1.7.0' } }),
       new RegExp(`${name.replace('/', '\\/')} is not a direct client dependency; it must reach the install only through`),
       `${name} must not be a direct dependency`,
     );
   }
   for (const name of PI_DIRECT.slice(1)) {
-    for (const drift of [undefined, '^1.6.1', '0.99.1']) {
+    for (const drift of [undefined, '^1.7.0', '0.99.1']) {
       assert.throws(
-        () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('1.6.1'), [name]: drift } }),
-        new RegExp(`${name.replace('/', '\\/')} must be a required dependency pinned exactly to 1\\.6\\.1`),
+        () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('1.7.0'), [name]: drift } }),
+        new RegExp(`${name.replace('/', '\\/')} must be a required dependency pinned exactly to 1\\.7\\.0`),
       );
     }
   }
@@ -237,17 +237,17 @@ test('the Pi runtime identity authority admits only an exact official closure', 
 test('the locked closure is exact, integrity-bearing and fork-free', () => {
   const entry = (name, version, integrity = `sha512-${'A'.repeat(86)}==`) => `    "${name}": ["${name}@${version}", "", {}, "${integrity}"],\n`;
   const lock = (body) => `{\n  "lockfileVersion": 1,\n  "packages": {\n${body}  },\n}\n`;
-  const identity = { version: '1.6.1' };
-  const good = PI_RUNTIME_CLOSURE.map((name) => entry(name, '1.6.1')).join('');
+  const identity = { version: '1.7.0' };
+  const good = PI_RUNTIME_CLOSURE.map((name) => entry(name, '1.7.0')).join('');
   assert.equal(readLockedPiClosure(lock(good), identity).size, PI_RUNTIME_CLOSURE.length);
   assert.throws(() => readLockedPiClosure(lock(good + entry('pi-subagents/@earendil-works/pi-tui', '0.85.1').replace('"pi-subagents/@earendil-works/pi-tui@0.85.1"', '"@earendil-works/pi-tui@0.85.1"')), identity),
-    /resolves to @earendil-works\/pi-tui@0\.85\.1, but the Pi closure is pinned to 1\.6\.1/);
+    /resolves to @earendil-works\/pi-tui@0\.85\.1, but the Pi closure is pinned to 1\.7\.0/);
   assert.throws(() => readLockedPiClosure(lock(good + `    "@earendil-works/pi-agent-core": ["@byok-sdk/pi-agent-core@0.86.1001", "", {}, "sha512-${'B'.repeat(86)}=="],\n`), identity),
     /retired fork/);
   assert.throws(() => readLockedPiClosure(lock(good.replace(`sha512-${'A'.repeat(86)}==`, '')), identity), /carries no sha512 integrity/);
   for (const name of ['@earendil-works/chord', '@earendil-works/pi-codemode', '@earendil-works/pi-mcp']) {
-    assert.throws(() => readLockedPiClosure(lock(good.replace(entry(name, '1.6.1'), '')), identity),
-      new RegExp(`${name.replace('/', '\\/')}@1\\.6\\.1 is not locked`));
+    assert.throws(() => readLockedPiClosure(lock(good.replace(entry(name, '1.7.0'), '')), identity),
+      new RegExp(`${name.replace('/', '\\/')}@1\\.7\\.0 is not locked`));
   }
 });
 
@@ -257,13 +257,13 @@ test('the repo pins the official Pi closure the release gates verify', () => {
   );
   const identity = parsePiRuntimeIdentity(clientManifest);
   assert.equal(identity.packageName, '@earendil-works/pi-coding-agent');
-  assert.equal(identity.version, '1.6.1');
+  assert.equal(identity.version, '1.7.0');
   assert.deepEqual(
     [...identity.closure].sort(),
     ['chord', 'pi-agent-core', 'pi-ai', 'pi-codemode', 'pi-coding-agent', 'pi-durable', 'pi-mcp', 'pi-schema', 'pi-telemetry', 'pi-tui'].map((name) => `@earendil-works/${name}`),
   );
   const locked = readLockedPiClosure(readFileSync(fileURLToPath(new URL('../../bun.lock', import.meta.url)), 'utf8'), identity);
-  assert.equal(locked.get(PI_DEPENDENCY_SPECIFIER), 'sha512-+VSb95N4PB+G7TLceg7wkbJT31BEeIBnUT9500g9a1rOsCx78CUw1YFGtLcRhS6jj8pdfm0fFwrakrMLu6lVAQ==');
+  assert.equal(locked.get(PI_DEPENDENCY_SPECIFIER), 'sha512-opRelA1oqV/o+cByICMYU87oiHuICeCkghHMqsZsDwDz9F6qo8HFhoH4J/wZkr6tBeFor7ryOSwEmpZsusYrbA==');
   assert.equal(clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER], undefined);
 });
 
@@ -287,10 +287,10 @@ for (const name of PI_RUNTIME_CLOSURE) for (const changed of ['record', 'lock', 
   });
 }
 // @sigstore/verify tests the certificate SAN with String#match against this pattern.
-for (const [ref, accepted] of [['v1.6.1', true], ['v1.6.10', false], ['v1.6.1-rc.1', false], ['v1x6x1', false]]) {
-  test(`Pi certificate identity for 1.6.1 ${accepted ? 'accepts' : 'rejects'} refs/tags/${ref}`, () => {
+for (const [ref, accepted] of [['v1.7.0', true], ['v1.7.10', false], ['v1.7.0-rc.1', false], ['v1x7x0', false]]) {
+  test(`Pi certificate identity for 1.7.0 ${accepted ? 'accepts' : 'rejects'} refs/tags/${ref}`, () => {
     const san = `https://github.com/earendil-works/pi/.github/workflows/build-binaries.yml@refs/tags/${ref}`;
-    assert.equal(san.match(piCertificateIdentityPattern('1.6.1')) !== null, accepted);
+    assert.equal(san.match(piCertificateIdentityPattern('1.7.0')) !== null, accepted);
   });
 }
 // Review forgeries: each keeps the bundle well formed and its digest recomputed, so only signature verification can refuse it.
@@ -312,8 +312,8 @@ for (const [label, forge] of [
   assert.throws(() => checkPiIntegrity(f), /provenance signature or certificate identity does not verify/);
 });
 for (const [label, mutate] of [
-  ['subject name', statement => { statement.subject[0].name = 'pkg:npm/foreign@1.6.1'; }],
-  ['subject version', statement => { statement.subject[0].name = statement.subject[0].name.replace('@1.6.1', '@9.0.0'); }],
+  ['subject name', statement => { statement.subject[0].name = 'pkg:npm/foreign@1.7.0'; }],
+  ['subject version', statement => { statement.subject[0].name = statement.subject[0].name.replace('@1.7.0', '@9.0.0'); }],
   ['subject digest', statement => { statement.subject[0].digest.sha512 = '0'.repeat(128); }],
   ['missing digest', statement => { delete statement.subject[0].digest.sha512; }],
   ['malformed digest', statement => { statement.subject[0].digest.sha512 = 'not-a-digest'; }],

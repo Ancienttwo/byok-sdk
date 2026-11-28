@@ -248,7 +248,7 @@ finds them as ESM does (#724). Three bundled third-party modules keep an empty
 Every other import of an extension resolves from the extension's own
 directory. An extension that does not load still fails the pi task.
 
-Pi 1.6.1, the version this client pins, depends on the exact npm package
+Pi 1.7.0, the version this client pins, depends on the exact npm package
 `undici` 8.12.4. Hosts upgrading to SDK 0.46.0 can remove the undici override
 added for #2098.
 An undici copy claims the process-wide `fetch`

@@ -171,7 +171,7 @@ type PiProviderBranch = readonly [file: string, line: string, kind: 'url' | 'dec
 const COPILOT = 'github-copilot is not a catalog vendor';
 const OPENCODE_GO = 'pi_model.providerId explicitly declares opencode-go with openai-completions';
 
-/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.6.1. */
+/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.7.0. */
 const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['api/anthropic-messages.js', 'const isOpenRouter = model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai");', 'url', 'openrouter base_url contains openrouter.ai'],
   ['api/anthropic-messages.js', 'if (model.provider !== "anthropic" || hasRequestAuth(apiKey, headers))', 'unreachable', 'federation runs only without a key; a byok launch always supplies one'],
@@ -180,7 +180,7 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['api/openai-completions.js', 'const thinkingSignature = model.provider === "opencode-go" && foundReasoningField === "reasoning"', 'declared', OPENCODE_GO],
   ['api/openai-completions.js', 'if (model.provider === "github-copilot") {', 'unreachable', COPILOT],
   ['api/openai-completions.js', 'if (model.provider === "openai")', 'unreachable', 'the openai vendor projects openai-responses only'],
-  ['api/openai-completions.js', 'if (model.provider === "opencode-go" && signature === "reasoning") {', 'declared', OPENCODE_GO],
+  ['api/openai-completions.js', 'if (model.provider === "opencode-go" && field === "reasoning") {', 'declared', OPENCODE_GO],
   ['api/openai-completions.js', 'const isZai = provider === "zai" ||', 'url', 'zai base_url contains api.z.ai'],
   ['api/openai-completions.js', 'provider === "zai-coding-cn" ||', 'url', 'zai-coding-cn base_url contains open.bigmodel.cn'],
   ['api/openai-completions.js', 'const isTogether = provider === "together" || baseUrl.includes("api.together.ai") || baseUrl.includes("api.together.xyz");', 'url', 'together base_url contains api.together.ai'],

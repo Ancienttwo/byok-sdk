@@ -152,7 +152,7 @@ describe('B-P2 native composition: runtime identity', () => {
     expect(identity.packageVersion).toBe(pinned.version);
     expect(identity.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(identity.tarballIntegrity).toMatch(/^sha512-/);
-    expect(identity.upstreamCommit).toBe('ef4a1cfcca62b77ad3558337ff3e1c7f6beeadfe');
+    expect(identity.upstreamCommit).toBe('fb0fe823539f6d04850f6e34748c01f01f212e1f');
     expect(identity.closureDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(identity.envelopeFormat).toBe('byok.pi.prepared-input');
     expect(identity.requestFormat).toBe('byok.pi.openai-completions.request');
@@ -320,6 +320,7 @@ describe('B-P2 native composition: pure compile', () => {
       'dist/api/constrained-sampling.js',
       'dist/api/github-copilot-headers.js',
       'dist/api/lazy.js',
+      'dist/api/openai-completions-reasoning.js',
       'dist/api/openai-completions.js',
       'dist/api/openai-prompt-cache.js',
       'dist/api/simple-options.js',

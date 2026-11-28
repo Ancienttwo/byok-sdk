@@ -106,6 +106,10 @@ The receipts record the local test revision `dea4d07c63294adbc3ff7d4aab3c2178570
 - `packages/keys/src/model-route.test.ts`
 - `scripts/release/pack-and-smoke.test.mjs`
 
+### Pi 1.7.0
+
+The strict `*` suite passed all 19 search scenarios on macOS arm64 with Node 24.22.3 and Bun 1.4.4, using the sandboxed loopback provider. The `qualified-launch` scenario exercised the production table and SDK distribution helper with Pi 1.7.0. [Upgrade evidence](pi-1.7.0-upgrade.md)
+
 ## Original F qualification results
 
 The attempt counts below are steps sent by the loopback model after any runtime-native discovery. Executions count only synthetic target `tools/call` receipts and include direct calls in the mixed case. Search discovery itself increments no write receipt. The outer names shown are model-visible. The runtime only emits an inner identity where the SDK has a qualified raw-arguments path and can verify a frozen match.

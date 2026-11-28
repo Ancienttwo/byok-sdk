@@ -9,26 +9,27 @@ The public SDK packages declare `engines.node` as `>=24.22.3`. Upgrade Node
 to 24.22.3 or later on Hosts and daemon machines before installing the new
 SDK. Rebuild Node SEA launchers with a supported Node executable.
 
-## Pi 1.6.1 closure
+## Pi 1.7.0 closure (#2585)
 
-- Re-prepare Pi inputs compiled with 1.6.0 before dispatch. The new closure
-  rejects the old identity with `preparation_runtime_identity_mismatch`. Rebind
-  Host accounting rulings to the new runtime identity.
-- The pinned keys catalog follows pi-ai 1.6.1. If lookup for a previously
-  cataloged model returns `not_in_catalog`, select an available model for
-  that provider before preparing inputs. A removed ID in
-  `ModelRoutePolicy.default_models` opens a new draft as manual with
-  `pi_model: null` when the policy still allows that ID. Update the default to
-  an available model or supply the manual Pi model configuration.
-- In the Baseten catalog, `deepseek-ai/DeepSeek-V4.1-Flash-1017` and
-  `deepseek-ai/DeepSeek-V4.1-Flash-1017-Fast` lose `medium` and gain `xhigh`.
-  `moonshotai/Kimi-K3.1-Pro` loses `minimal` and gains `max`. Its `xhigh` is
-  explicitly disabled in 1.6.1 and was already unavailable in 1.6.0. Review
-  defaults and select a supported level when choosing these catalog entries.
+- Re-prepare inputs compiled with an earlier Pi closure before dispatch. Pi
+  rejects the previous runtime identity with
+  `preparation_runtime_identity_mismatch`. Rebind Host accounting rulings to
+  the 1.7.0 closure to avoid `accounting_policy_inapplicable`.
+- Review `ModelRoutePolicy.default_models` against the pinned 1.7.0 keys
+  catalog. Replace retired Ant Ling `Ring-2.6-1T` with a supported model such
+  as `Ling-3.1-flash` and Qwen Token Plan `qwen4-max-preview` with `qwen4-max`.
+  The catalog also removes entries for OpenRouter and Together. When lookup
+  returns `not_in_catalog`, choose a supported model or supply a manual Pi
+  model configuration.
+- Hosts moving from the published 1.6.0 pin should also review the Baseten
+  models `deepseek-ai/DeepSeek-V4.1-Flash-1017` and
+  `deepseek-ai/DeepSeek-V4.1-Flash-1017-Fast`, which lose `medium` and gain
+  `xhigh`. `moonshotai/Kimi-K3.1-Pro` loses `minimal` and gains `max`.
 - Stored profiles whose catalog entry was removed or whose saved configuration
-  no longer matches the entry reopen as manual. The draft retains the saved
-  `pi_model` configuration and thinking level.
-- Existing pi-durable 1.6.0 SQLite replicas can open in place.
+  no longer matches the entry reopen as manual with their saved `pi_model`
+  configuration and thinking level.
+- Existing pi-durable 1.6.0 and 1.6.1 SQLite replicas open in place. No export,
+  rebuild or schema migration is required.
 
 ## Cursor Agent CLI (#2514)
 

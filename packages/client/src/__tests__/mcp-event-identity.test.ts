@@ -17,7 +17,7 @@ import { AgyProjection, agyMcpEventIdentities } from '../adapters/antigravity/pr
 import { DshProjection } from '../adapters/dsh/projection';
 import { GrokProjection } from '../adapters/grok/projection';
 import { OpenCodeProjection } from '../adapters/opencode/projection';
-import { createSessionKernel } from '../../vendor/oar/223703d/shared/session-kernel';
+import { createSessionKernel } from '../../vendor/oar/19f1ecc/shared/session-kernel';
 import { projectMcpTools } from '../mcp/projection';
 
 const identities = mcpEventIdentities({ market__feed: { toolsetId: 'market', serverName: 'market__feed', serverInfo: { name: 'market', version: '1' }, protocolVersion: '2025-03-26', tools: [

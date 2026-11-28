@@ -11,7 +11,7 @@ import { CursorAdapter } from '../adapters/cursor/cursor-adapter';
 import { GrokProjection } from '../adapters/grok/projection';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
-import { createSessionKernel } from '../../vendor/oar/223703d/shared/session-kernel';
+import { createSessionKernel } from '../../vendor/oar/19f1ecc/shared/session-kernel';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { describe, expect, it, vi } from 'vitest';
