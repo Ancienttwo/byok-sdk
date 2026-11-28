@@ -222,7 +222,7 @@ describe("BYOK NSH Foundations Gallery", () => {
   });
 
   test("real ByokShell adapter enforces bridge contract allowlist and exposes Stop listeners", async () => {
-    expect(ByokShell.bridgeVersion()).toBe(4);
+    expect(ByokShell.bridgeVersion()).toBe(5);
 
     for (const forbidden of ["hello", "shutdown", "keys.profilesChanged", "unknown.op"]) {
       await expect(ByokShell.call(forbidden, null)).rejects.toMatchObject({ code: "unknown_method" });

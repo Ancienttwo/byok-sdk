@@ -1,14 +1,18 @@
-import { signal, Text, View } from "nsh";
+import { computed, resource, signal, Text, View } from "nsh";
 import type { ModelChoice } from "../../../../src/host/conversation/catalog.ts";
 import type { BotProfile } from "../../../../src/host/store/types.ts";
-import { archiveBot, saveBot } from "../../store.ts";
-import { Button, Card, Dialog, Field, Input, Select, Tab, Tabs, Textarea } from "../../ui/index.ts";
+import { toBridgeCallError } from "../../bridge.ts";
+import { archiveBot, hostReady, readDevice, saveBot, setActiveSection } from "../../store.ts";
+import { Badge, Button, Card, Dialog, Field, Input, Select, Spinner, Tab, Tabs, Textarea } from "../../ui/index.ts";
+import { runtimeSignInGuidance } from "../settings/runtimeStatus.ts";
+import { choiceAvailability } from "./availability.ts";
 import { BotMemoryPanel } from "./BotMemoryPanel.tsx";
 import { createCommand } from "./command.ts";
 
 export interface ProfileEditorProps {
   initial: BotProfile;
   creating: boolean;
+  /** Every model the Host offers; the picker marks each with its runtime's availability. */
   models: readonly ModelChoice[];
   /** The saved or archived Bot's id; undefined when closed without a change. */
   onDone: (saved: string | undefined) => void;
@@ -18,6 +22,10 @@ export interface ProfileEditorProps {
  * Creates or edits a Bot. The id comes with `initial` and stays, so a retried Save is the same command to the Host.
  * Archive is irreversible (K8 never takes an archived Bot back), so it asks once more and says so; the Bot's home and
  * transcript stay. An existing Bot also shows its memory in a Memory tab; a new Bot has no home yet.
+ *
+ * The picker reads `settings.device` when the editor opens and on Check again (`checkAuth`). A new Bot or a re-pointed
+ * one takes only a selectable model, and a new Bot starts on the first one; an existing Bot keeps its model while its
+ * runtime is unavailable and shows why.
  */
 export function ProfileEditor(props: ProfileEditorProps) {
   const profile = signal<BotProfile>(props.initial);
@@ -25,9 +33,56 @@ export function ProfileEditor(props: ProfileEditorProps) {
   const confirmArchive = signal(false);
   const command = createCommand();
   const edit = (patch: Partial<BotProfile>) => profile.update((current) => ({ ...current, ...patch }));
+  const deviceReads = signal(0);
+  // Consumed once by the read that Check again triggers.
+  let pendingCheckAuth = false;
+  const device = resource(
+    () => (hostReady() ? deviceReads() : false),
+    async () => {
+      const checkAuth = pendingCheckAuth;
+      pendingCheckAuth = false;
+      const view = await readDevice(checkAuth ? { checkAuth: true } : undefined);
+      const first = props.models.find((model) => choiceAvailability(model, view.runtimes).selectable);
+      if (props.creating && profile().model === "" && first !== undefined) {
+        edit({ model: first.id });
+      }
+      return view;
+    },
+  );
+  const checkAgain = () => {
+    pendingCheckAuth = true;
+    deviceReads.update((n) => n + 1);
+  };
+  const deviceFailure = () => {
+    const error = device.error();
+    return error === undefined ? null : toBridgeCallError(error).message;
+  };
+  const availability = (model: ModelChoice) => choiceAvailability(model, device()?.runtimes);
+  const selected = () => props.models.find((model) => model.id === profile().model);
+  const noneSelectable = computed(
+    () => device() !== undefined && !props.models.some((model) => availability(model).selectable),
+  );
+  // The selected model's status when it is not plainly ready: why it cannot run, or that it needs a sign-in.
+  const selectedNotice = () => {
+    const model = selected();
+    if (model === undefined || device() === undefined) {
+      return undefined;
+    }
+    const { status, selectable } = availability(model);
+    return status === null || (selectable && status.key !== "signed-out") ? undefined : { model, status };
+  };
+  const signInNote = (runtime: string) => {
+    const guidance = runtimeSignInGuidance(runtime);
+    return guidance.kind === "command" ? `${guidance.command}: ${guidance.note}` : guidance.note;
+  };
   const complete = () => {
     const current = profile();
-    return current.name !== "" && current.role !== "" && current.persona !== "" && current.model !== "";
+    if (current.name === "" || current.role === "" || current.persona === "" || current.model === "") {
+      return false;
+    }
+    // An existing Bot keeps its model whatever its runtime's state; a new or changed one needs a selectable model.
+    const model = selected();
+    return (!props.creating && current.model === props.initial.model) || (model !== undefined && availability(model).selectable);
   };
   const save = async () => {
     const current = profile();
@@ -97,17 +152,81 @@ export function ProfileEditor(props: ProfileEditorProps) {
               />
             </Field>
             <Field label="Model" required>
-              <Select
-                testID="conv-profile-model"
-                accessibilityLabel="Model"
-                items={props.models.map((model) => ({ value: model.id, title: model.label }))}
-                value={profile().model}
-                onChange={(value) => {
-                  if (value !== null) {
-                    edit({ model: value });
-                  }
-                }}
-              />
+              <View class="gap-2">
+                <View class="flex-row items-center gap-2">
+                  <View class="flex-1">
+                    <Select
+                      testID="conv-profile-model"
+                      accessibilityLabel="Model"
+                      items={props.models.map((model) => {
+                        const state = availability(model);
+                        return {
+                          value: model.id,
+                          title: state.status === null ? model.label : `${model.label} · ${state.status.symbol} ${state.status.label}`,
+                          disabled: !state.selectable,
+                        };
+                      })}
+                      value={profile().model}
+                      onChange={(value) => {
+                        if (value !== null) {
+                          edit({ model: value });
+                        }
+                      }}
+                    />
+                  </View>
+                  <Button
+                    testID="conv-profile-check-again"
+                    variant="outline"
+                    size="sm"
+                    loading={device.loading()}
+                    disabled={!hostReady() || device.loading()}
+                    onPress={checkAgain}
+                  >
+                    Check again
+                  </Button>
+                </View>
+                <If when={device() === undefined && deviceFailure() === null}>
+                  <View class="flex-row items-center gap-2" accessibilityState={{ busy: true }}>
+                    <Spinner />
+                    <Text class="text-xs text-muted-foreground">Checking agents…</Text>
+                  </View>
+                </If>
+                <If when={deviceFailure()}>
+                  {(message) => (
+                    <View role="alert" testID="conv-profile-agents-error">
+                      <Text class="text-xs text-destructive">{`Agents unavailable: ${message()}`}</Text>
+                    </View>
+                  )}
+                </If>
+                <If when={selectedNotice()}>
+                  {(notice) => (
+                    <View testID="conv-profile-model-status" class="gap-1">
+                      <View class="flex-row items-center gap-2">
+                        <Text class="text-xs text-foreground">{notice().model.label}</Text>
+                        <Badge
+                          testID="conv-profile-model-status-badge"
+                          variant={notice().status.variant}
+                          symbol={notice().status.symbol}
+                          label={notice().status.label}
+                        />
+                      </View>
+                      <If when={notice().status.key === "signed-out"}>
+                        <Text testID="conv-profile-model-signin" class="text-xs text-muted-foreground">
+                          {signInNote(notice().model.runtime)}
+                        </Text>
+                      </If>
+                    </View>
+                  )}
+                </If>
+                <If when={noneSelectable()}>
+                  <View testID="conv-profile-no-agent" class="flex-row items-center gap-2">
+                    <Text class="flex-1 text-xs text-muted-foreground">No agent can run on this device yet.</Text>
+                    <Button testID="conv-profile-setup-pi" variant="outline" size="sm" onPress={() => setActiveSection("keys")}>
+                      Set up a Pi key
+                    </Button>
+                  </View>
+                </If>
+              </View>
             </Field>
             <If when={command.error() !== null && !confirmArchive()}>
               <View role="alert" testID="conv-profile-error">

@@ -101,8 +101,10 @@ bridge and composes the Host after main's hello (`src/host/compose.ts`):
   other state stops the Host with the refusal reason, as does a halt at start.
 - Wakes and Agent messages the server delivers before the conversation opens wait for
   it; one still waiting when the Host closes is refused and retried on the next run.
-- K8's model catalog is the `brand.config.ts` entries, then one Pi entry `pi:<profile_ref>`
-  per keys profile that has `pi_model`, pinned to that profile (`catalogEntryFor`, lane
+- K8's model catalog is one entry per runtime adapter the Host composed whose descriptor
+  takes a `device-default` selection (id = adapter id, in `brand.config.ts` `models` order,
+  unlisted ones last), then one Pi entry `pi:<profile_ref>` per keys profile that has
+  `pi_model`, pinned to that profile (`catalogEntryFor`, lane
   `byok-profile`). The enabled profile is not read as a default. The catalog is built from
   the keys store at Host start and rebuilt after each custody receipt and provider-list
   Reload. Reconciliation reads persisted profiles without repeating a key write; while

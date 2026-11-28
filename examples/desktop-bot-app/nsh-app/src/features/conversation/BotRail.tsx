@@ -1,4 +1,4 @@
-import { signal, Text, View } from "nsh";
+import { signal, View } from "nsh";
 import type { RolePreset } from "../../../../src/host/conversation/catalog.ts";
 import type { BotState, BotView } from "../../../../src/host/conversation/view.ts";
 import { Badge, Button, Disclosure, ListItem, type BadgeVariant } from "../../ui/index.ts";
@@ -17,8 +17,6 @@ export interface BotRailProps {
   bots: readonly BotView[];
   roles: readonly RolePreset[];
   selected: string | null;
-  /** False while the Host offers no model: a new Bot needs one. */
-  canCreate: boolean;
   onSelect: (id: string) => void;
   onNew: (role: RolePreset) => void;
 }
@@ -53,16 +51,12 @@ export function BotRail(props: BotRailProps) {
         </Each>
       </View>
       <Disclosure testID="conv-new-by-role" open={newOpen()} title="New by role" onToggle={(next) => newOpen.set(next)}>
-        <If when={!props.canCreate}>
-          <Text class="text-xs text-muted-foreground">No model is available yet: a new Bot needs one.</Text>
-        </If>
         <Each of={props.roles} key={(role) => role.id}>
           {(role) => (
             <Button
               testID={`conv-new-${role().id}`}
               variant="ghost"
               size="sm"
-              disabled={!props.canCreate}
               onPress={() => props.onNew(role())}
             >
               {role().label}

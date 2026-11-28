@@ -90,7 +90,9 @@ describe('desktop Host composition', () => {
     await expect(second.domains.handlers['k8.saveBot'](bot)).rejects.toThrow('Unavailable model: pi:local');
     await second.domains.handlers['keys.profilesChanged'](undefined);
     await second.domains.handlers['k8.saveBot'](bot);
-    expect((await second.domains.handlers['k8.view']({ botId: null })).models).toContainEqual({ id: 'pi:local', label: 'Local' });
+    // Every composed runtime is a choice whatever this machine's detection says, then the profile's Pi entry.
+    expect((await second.domains.handlers['k8.view']({ botId: null })).models.map(model => [model.id, model.label, model.runtime]))
+      .toEqual([['pi', 'Pi', 'pi'], ['claude', 'Claude Code', 'claude'], ['codex', 'Codex', 'codex'], ['pi:local', 'Local', 'pi']]);
     await second.close();
 
     // A server that no longer lists this device refuses the pairing; nothing re-pairs.
