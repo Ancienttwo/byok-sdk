@@ -1,3 +1,4 @@
+import type { SkillId } from '@byok-sdk/protocol';
 import type { AgentHomeProjectionRequest } from '@byok-sdk/server';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import type { Room, Round, Seat } from './rules/rooms.js';
@@ -15,6 +16,8 @@ export interface BotProfile {
   autonomy?: Autonomy;
   /** #1319: the team authority suspended this Bot. It stays a member and takes no new work. Absent: participating. */
   participation?: 'suspended';
+  /** #2578: Host-owned logical skill ids merged into this Bot's execution template as `requiredSkills` (omitted when empty). */
+  skills?: readonly SkillId[];
   execution: ExecutionTemplate;
 }
 export interface HomeOperation {

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "02316892807d1e7c464e258bc79d5002be10f83f3ebeb6b16a98f4f582dd37a7"
+    "snapshotSha256": "2ec5688ee950007c27244aa1f9ab718020530e179baabb95f74ccbd799fde247"
   },
   "configFields": {
     "status": "tracked",
@@ -164,6 +164,16 @@
         "export:@byok-sdk/protocol/constants#SKILL_SELECTION_CAPABILITY",
         "export:@byok-sdk/server#AgentResumeDispatchInput"
       ]
+    },
+    {
+      "id": "bot-profile-skills",
+      "impact": "additive",
+      "summary": "@byok-sdk/bot-collaboration TeamSnapshotBot and BotProfile gain optional Host-owned skills (SkillId[]), merged template-first into Turn execution requiredSkills (max 16) and stripped from dream executions.",
+      "migration": "docs/spec.md#k8-bot-skills",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#TeamSnapshotBot",
+        "export:@byok-sdk/bot-collaboration/host-kit#BotProfile"
+      ]
     }
   ],
   "changes": [
@@ -173,6 +183,16 @@
       "before": "optional schema-sha256=18d06e34b46dd3d1",
       "after": "optional schema-sha256=553ef9189423bdfc",
       "entry": "cursor-agent-cli"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#TeamSnapshotBot",
+      "change": "changed",
+      "entry": "bot-profile-skills"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BotProfile",
+      "change": "changed",
+      "entry": "bot-profile-skills"
     },
     {
       "item": "export:@byok-sdk/client#AgyAdapter",

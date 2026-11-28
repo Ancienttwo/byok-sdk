@@ -1,4 +1,4 @@
-import type { AgentHomeProjectionReadback, BotTurnOutcome, CreateBotAction, RoomFields, UpdateBotAction } from '@byok-sdk/protocol';
+import type { AgentHomeProjectionReadback, BotTurnOutcome, CreateBotAction, RoomFields, SkillId, UpdateBotAction } from '@byok-sdk/protocol';
 import { hash, canonical, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { json, type CollaborationState } from './model.js';
 import type { BotProfile, HomeOperation, Room, TeamState } from './team-model.js';
@@ -7,7 +7,7 @@ import { roomFields, roomVisibility } from './rules/rooms.js';
 
 import { NEW_BOTS, NEW_ROOMS } from './rules/schema.js';
 import { DEFAULT_AUTONOMY } from './rules/autonomy.js';
-import { activeBot, admitBotToolsets, archiveBot, inactive, profileProjection, refuseExternalRooms, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, type TeamSnapshotBot } from './rules/team.js';
+import { activeBot, admitBotToolsets, archiveBot, inactive, profileProjection, refuseExternalRooms, refuseExternalTeam, requireMain, TEAM_BOT_LIMIT, withBotSkills, type TeamSnapshotBot } from './rules/team.js';
 
 export { activeBot, admitBotToolsets, inactive, NEW_BOTS, NEW_ROOMS, requireMain, roomFields };
 export const TEAM_NOTE_LIMIT = 20;
@@ -99,20 +99,29 @@ export function createBot(state: CollaborationState, taskId: string, action: Cre
   projection(state, bot);
   return bot;
 }
-export function updateBot(state: CollaborationState, action: UpdateBotAction, models: Record<string, ExecutionTemplate>, readOnlyToolsets: readonly string[] = []): void {
+function applyBotUpdate(state: CollaborationState, action: UpdateBotAction, models: Record<string, ExecutionTemplate>,
+  readOnlyToolsets: readonly string[], overrideSkills?: { readonly value: readonly SkillId[] | undefined }): void {
   const bot = activeBot(state.team, action.botId);
   const model = action.model ?? bot.model, base = models[model];
   if (base) admitBotToolsets(base, readOnlyToolsets);
   const revision = (BigInt(bot.revision) + 1n).toString();
   if (BigInt(revision) > 9223372036854775807n) throw new Error('Profile revision limit');
+  const rawSkills = overrideSkills ? overrideSkills.value : bot.skills;
+  const nextSkills = rawSkills?.length ? [...rawSkills] : undefined;
   // #1357: without a template the Bot keeps its stored one, and the freeze holds its Turns until the Host provides one.
-  const execution = structuredClone(base ?? bot.execution);
+  // Do not merge onto `bot.execution` when `base` is absent: it already carries prior Bot skills, and `applyModels` rebuilds from the raw template once restored.
+  const execution = base ? withBotSkills(structuredClone(base), nextSkills) : structuredClone(bot.execution);
   // Model selection cannot move the Bot home to another device.
   execution.deviceId = bot.execution.deviceId;
   execution.payload.agentRef = { agentId: bot.id, profileRevision: revision };
   Object.assign(bot, { name: action.name ?? bot.name, role: action.role ?? bot.role, persona: action.persona ?? bot.persona,
     model, revision, readyRevision: null, execution });
+  if (nextSkills) bot.skills = nextSkills;
+  else delete bot.skills;
   projection(state, bot);
+}
+export function updateBot(state: CollaborationState, action: UpdateBotAction, models: Record<string, ExecutionTemplate>, readOnlyToolsets: readonly string[] = []): void {
+  applyBotUpdate(state, action, models, readOnlyToolsets);
 }
 /**
  * The `teamBot` port of a team snapshot (#739 Q4c). A new Bot gets the snapshot id and its first projection.
@@ -122,19 +131,22 @@ export function updateBot(state: CollaborationState, action: UpdateBotAction, mo
 export function writeSnapshotBot(state: CollaborationState, row: TeamSnapshotBot, models: Record<string, ExecutionTemplate>, readOnlyToolsets: readonly string[] = []): void {
   const bot = state.team.bots[row.id];
   if (state.team.external?.persona) { writeHostProfile(state, bot, row, models, readOnlyToolsets); return; }
+  const skills = row.skills?.length ? [...row.skills] : undefined;
   if (bot) {
-    if (bot.name !== row.name || bot.role !== row.role || bot.persona !== row.persona || bot.model !== row.model) {
-      updateBot(state, { botId: row.id, name: row.name, role: row.role, persona: row.persona, model: row.model }, models, readOnlyToolsets);
+    if (bot.name !== row.name || bot.role !== row.role || bot.persona !== row.persona || bot.model !== row.model
+      || !same(bot.skills ?? [], skills ?? [])) {
+      applyBotUpdate(state, { botId: row.id, name: row.name, role: row.role, persona: row.persona, model: row.model }, models, readOnlyToolsets, { value: skills });
     }
     return;
   }
   const base = models[row.model];
   if (!base) throw new Error('Unavailable model');
   admitBotToolsets(base, readOnlyToolsets);
-  const execution = structuredClone(base);
+  const execution = withBotSkills(structuredClone(base), skills);
   execution.payload.agentRef = { agentId: row.id, profileRevision: '1' };
   const created: BotProfile = { id: row.id, name: row.name, role: row.role, persona: row.persona, model: row.model,
-    mainBot: false, archived: false, revision: '1', readyRevision: null, autonomy: DEFAULT_AUTONOMY, execution };
+    mainBot: false, archived: false, revision: '1', readyRevision: null, autonomy: DEFAULT_AUTONOMY,
+    ...(skills ? { skills } : {}), execution };
   state.team.bots[row.id] = created;
   projection(state, created);
 }
@@ -146,14 +158,16 @@ export function writeSnapshotBot(state: CollaborationState, row: TeamSnapshotBot
  */
 export function applyModels(state: CollaborationState, models: Readonly<Record<string, ExecutionTemplate>>, readOnlyToolsets: readonly string[]): void {
   for (const model of Object.values(models)) admitBotToolsets(model, readOnlyToolsets);
+  const updates: Array<[BotProfile, ExecutionTemplate]> = [];
   for (const bot of Object.values(state.team.bots)) {
     const base = models[bot.model];
     if (bot.archived || !base) continue;
-    const execution = structuredClone(base);
+    const execution = withBotSkills(structuredClone(base), bot.skills);
     execution.deviceId = bot.execution.deviceId;
     execution.payload.agentRef = { agentId: bot.id, profileRevision: bot.revision };
-    bot.execution = execution;
+    updates.push([bot, execution]);
   }
+  for (const [bot, execution] of updates) bot.execution = execution;
 }
 /**
  * Host persona mode (#879). The revision never goes back, and a profile change needs a newer revision. A newer revision
@@ -163,8 +177,10 @@ export function applyModels(state: CollaborationState, models: Readonly<Record<s
 function writeHostProfile(state: CollaborationState, bot: BotProfile | undefined, row: TeamSnapshotBot, models: Record<string, ExecutionTemplate>,
   readOnlyToolsets: readonly string[]): void {
   const revision = row.profileRevision!;
+  const nextSkills = row.skills?.length ? [...row.skills] : undefined;
   if (bot) {
-    const changed = bot.name !== row.name || bot.role !== row.role || bot.persona !== row.persona || bot.model !== row.model;
+    const changed = bot.name !== row.name || bot.role !== row.role || bot.persona !== row.persona || bot.model !== row.model
+      || !same(bot.skills ?? [], nextSkills ?? []);
     if (BigInt(revision) < BigInt(bot.revision)) throw new Error(`Profile revision ${revision} of ${row.id} is older than ${bot.revision}`);
     if (revision === bot.revision) {
       if (changed) throw new Error(`A profile change of ${row.id} needs a newer profile revision`);
@@ -175,13 +191,19 @@ function writeHostProfile(state: CollaborationState, bot: BotProfile | undefined
   const base = models[row.model];
   if (base) admitBotToolsets(base, readOnlyToolsets);
   else if (!bot) throw new Error('Unavailable model');
-  const execution = structuredClone(base ?? bot!.execution);
+  const execution = base ? withBotSkills(structuredClone(base), nextSkills) : structuredClone(bot!.execution);
   // Model selection cannot move the Bot home to another device.
   if (bot) execution.deviceId = bot.execution.deviceId;
   execution.payload.agentRef = { agentId: row.id, profileRevision: revision };
   const fields = { name: row.name, role: row.role, persona: row.persona, model: row.model, revision, execution };
-  if (bot) Object.assign(bot, fields);
-  else state.team.bots[row.id] = { id: row.id, ...fields, mainBot: false, archived: false, readyRevision: null, autonomy: DEFAULT_AUTONOMY };
+  if (bot) {
+    Object.assign(bot, fields);
+    if (nextSkills) bot.skills = nextSkills;
+    else delete bot.skills;
+  } else {
+    state.team.bots[row.id] = { id: row.id, ...fields, mainBot: false, archived: false, readyRevision: null, autonomy: DEFAULT_AUTONOMY,
+      ...(nextSkills ? { skills: nextSkills } : {}) };
+  }
 }
 export function applyManagement(state: CollaborationState, actor: string, taskId: string, outcome: BotTurnOutcome,
   models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets: readonly string[] = []): void {

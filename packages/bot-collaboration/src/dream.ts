@@ -148,7 +148,7 @@ function chooseModel(policy: DreamPolicy, models: Readonly<Record<string, Execut
 }
 /** The template's target with the Bot's Agent, the dream duration limit, and none of what a Bot Turn offers. */
 function dreamExecution(base: ExecutionTemplate, bot: ExecutionTemplate, instruction: string, maxDurationMs: number, window: { fromMs: number; toMs: number }, nativeSessions: boolean): ExecutionTemplate {
-  const { messageEgress: _egress, requiredToolsets: _toolsets, agentMemoryCommit: _commit, homeAccess: _home, preparation: _preparation, nativeSessions: _nativeSessions, ...payload } = base.payload;
+  const { messageEgress: _egress, requiredToolsets: _toolsets, requiredSkills: _skills, agentMemoryCommit: _commit, homeAccess: _home, preparation: _preparation, nativeSessions: _nativeSessions, ...payload } = base.payload;
   return { deviceId: bot.deviceId, payload: { ...payload, instruction, session: { mode: 'fresh' }, agentRef: bot.payload.agentRef, agentMemory: 'none',
     limits: { maxDurationMs }, terminalProjection: { mode: 'none' }, ...(nativeSessions && targetsPi(payload.target) ? { nativeSessions: { ...window, ifAdvertised: true } } : {}) } };
 }
