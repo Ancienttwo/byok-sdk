@@ -3,7 +3,7 @@ import { resource, setColorScheme, signal, untracked } from "nsh";
 import type { WindowRef } from "nsh/desktop";
 import type { BotProfile } from "../../src/host/store/types.ts";
 import type { ActivityCard } from "../../src/host/activity/cards.ts";
-import type { DeviceView, DreamingSetting, HostSettings } from "../../src/host/settings/types.ts";
+import type { DeviceParams, DeviceView, DreamingSetting, HostSettings } from "../../src/host/settings/types.ts";
 import type { LoginItemView } from "../../src/bridge/domains/settings.ts";
 import type { ShellView } from "../../src/bridge/domains/shell.ts";
 import type { BridgeMethods, SupervisedHostState } from "../../src/bridge/protocol.ts";
@@ -237,9 +237,9 @@ export async function decideApproval(taskId: string, approvalId: string, decisio
   reloadActivityCards();
 }
 
-/** Reads the daemon's status and the SDK doctor (`settings.device`). */
-export async function readDevice(): Promise<DeviceView> {
-  return await bridge.call("settings.device", undefined);
+/** Reads the daemon's status and the SDK doctor (`settings.device`). Pass `{ checkAuth: true }` to re-probe login state. */
+export async function readDevice(params?: DeviceParams): Promise<DeviceView> {
+  return await bridge.call("settings.device", params);
 }
 
 /** Reads the Host settings (`settings.get`). */

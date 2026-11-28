@@ -12,7 +12,7 @@ const RAW_CONTRACT_JSON: &str = include_str!("../../../src/bridge/bridge-contrac
 pub const EXPECTED_SCHEMA_VERSION: u32 = 2;
 
 /// Expected NDJSON bridge protocol version shared between shell and Host.
-pub const EXPECTED_BRIDGE_VERSION: u32 = 3;
+pub const EXPECTED_BRIDGE_VERSION: u32 = 4;
 
 const REQUIRED_CORE_METHODS: [&str; 3] = ["hello", "status", "shutdown"];
 

@@ -3,7 +3,9 @@
  * Methods are named `settings.<verb>`; the Host handlers live in `src/host/settings/domain.ts`.
  */
 import type { BridgeDomain } from '../domain.ts';
-import type { DeviceView, DreamingSetting, HostSettings } from '../../host/settings/types.ts';
+import type { DeviceParams, DeviceView, DreamingSetting, HostSettings } from '../../host/settings/types.ts';
+
+export type { DeviceParams };
 
 /** Whether the app opens at login, as the OS reports it. Linux has no login item: `supported` is false there. */
 export interface LoginItemView {
@@ -12,7 +14,7 @@ export interface LoginItemView {
 }
 
 export interface SettingsMethods {
-  'settings.device': { params: undefined; result: DeviceView };
+  'settings.device': { params: DeviceParams | undefined; result: DeviceView };
   'settings.get': { params: undefined; result: HostSettings };
   /** Persists the switch and model list; K8 reads them when the Host next starts. */
   'settings.setDreaming': { params: DreamingSetting; result: HostSettings };

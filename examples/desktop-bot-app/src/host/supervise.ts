@@ -30,10 +30,11 @@ import { HostStoreRefusedError } from './precheck.ts';
  * process exits non-zero and main restarts it.
  */
 export async function superviseHost(
-  options: Omit<HostCompositionOptions, 'onChanged'>,
+  options: Omit<HostCompositionOptions, 'onChanged' | 'shutdownSignal'>,
   io: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout },
 ): Promise<void> {
   let state: HostState = { state: 'starting', pid: process.pid };
+  const shutdown = new AbortController();
   const push = (next: HostState) => {
     state = next;
     io.output.write(encodeMessage({ event: 'state', state }));
@@ -58,7 +59,7 @@ export async function superviseHost(
     let host: ComposedHost;
     try {
       // A domain's view change re-sends the unchanged state: main turns every state push into one coalesced renderer hint.
-      host = await composeHost({ ...options, onChanged: () => push(state) });
+      host = await composeHost({ ...options, onChanged: () => push(state), shutdownSignal: shutdown.signal });
     } catch (error) {
       if (!(error instanceof HostStoreRefusedError || error instanceof HostStoppedError)) throw error;
       // A stopped Host still exports diagnostics, with the config it would have run its daemon with.
@@ -89,6 +90,7 @@ export async function superviseHost(
   let closing: Promise<void> | undefined;
   const close = () => {
     methods = { status };
+    shutdown.abort();
     return closing ??= (async () => {
       const host = await composing;
       await Promise.allSettled(inflight);

@@ -61,13 +61,16 @@ fn contract_parser_fails_closed_on_version_schema_and_invariant_drift() {
         })
     );
 
-    let wrong_bridge = valid.replace("\"bridgeVersion\": 3", "\"bridgeVersion\": 4");
+    let wrong_bridge = valid.replace(
+        &format!("\"bridgeVersion\": {}", EXPECTED_BRIDGE_VERSION),
+        &format!("\"bridgeVersion\": {}", EXPECTED_BRIDGE_VERSION + 1),
+    );
     assert_ne!(wrong_bridge, valid);
     assert_eq!(
         BridgeContract::parse_str(&wrong_bridge),
         Err(ContractError::UnsupportedBridgeVersion {
             expected: EXPECTED_BRIDGE_VERSION,
-            actual: 4,
+            actual: EXPECTED_BRIDGE_VERSION + 1,
         })
     );
 

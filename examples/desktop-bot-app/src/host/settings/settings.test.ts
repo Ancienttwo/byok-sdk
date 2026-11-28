@@ -1,20 +1,93 @@
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { DiagnosticsSnapshot } from '@byok-sdk/client';
+import { createInterface } from 'node:readline';
+import { PassThrough } from 'node:stream';
+import type { Daemon, DaemonConfig, DiagnosticsSnapshot, RuntimeAdapter, RuntimeObservation } from '@byok-sdk/client';
 import { describe, expect, it, vi } from 'vitest';
+import { BRIDGE_VERSION, encodeMessage } from '../../bridge/protocol.ts';
+import { serveBridge } from '../../bridge/server.ts';
 import { trayMenu } from '../../main/tray-menu.ts';
 import type { HostContext } from '../domains.ts';
-import { deviceView } from './device.ts';
+import { deviceSettings, deviceView } from './device.ts';
 import { createSettingsDomain } from './domain.ts';
 import { DEFAULT_SETTINGS, dreamingOption, SettingsDamagedError, settingsStore } from './store.ts';
 
 const status = {
   paired: true, deviceId: 'dev-1', lifecycle: { phase: 'running', connection: 'open' }, activeTaskCount: 2, pendingTerminalCommits: 0,
   runtimes: [
-    { id: 'pi', present: true, outcome: 'available', version: '1.3.0', versionVerdict: { state: 'warn', qualifiedVersion: '1.3.0' } },
-    { id: 'codex', present: false, outcome: 'unavailable', reason: 'not_found' },
-  ],
+    {
+      id: 'claude',
+      present: true,
+      outcome: 'available',
+      version: '2.1.0',
+      authPresent: true,
+      executablePath: '/usr/local/bin/claude',
+      executableSource: 'path',
+      versionVerdict: { state: 'allow', qualifiedVersion: '2.1.0' },
+      steer: true,
+      resume: true,
+    },
+    {
+      id: 'codex',
+      present: true,
+      outcome: 'available',
+      version: '0.50.0',
+      authPresent: false,
+      steer: true,
+      resume: true,
+    },
+    {
+      id: 'opencode',
+      present: true,
+      outcome: 'available',
+      version: '0.9.0',
+      steer: false,
+      resume: true,
+    },
+    {
+      id: 'grok',
+      present: false,
+      outcome: 'timeout',
+      steer: false,
+      resume: true,
+    },
+    {
+      id: 'pi',
+      present: true,
+      outcome: 'available',
+      version: '1.3.0',
+      qualifiedVersion: '1.2.0',
+      versionVerdict: { state: 'warn', qualifiedVersion: '1.2.0' },
+      upgrade: { state: 'available', installedVersion: '1.3.0', qualifiedVersion: '1.4.0', command: 'npm i -g pi' },
+      steer: true,
+      resume: true,
+    },
+    {
+      id: 'dsh',
+      present: true,
+      outcome: 'available',
+      version: '0.1.0',
+      versionVerdict: { state: 'block', qualifiedVersion: '0.2.0', matched: '0.1.0' },
+      steer: false,
+      resume: false,
+    },
+    {
+      id: 'agy',
+      present: false,
+      outcome: 'not-found',
+      steer: false,
+      resume: false,
+    },
+    {
+      id: 'refused-rt',
+      present: false,
+      outcome: 'refused',
+      reason: 'app_server_unavailable',
+      steer: false,
+      resume: false,
+    },
+  ] satisfies RuntimeObservation[],
 } as unknown as Parameters<typeof deviceView>[0];
 const doctor = {
   generatedAt: '2026-11-11T00:00:00Z',
@@ -23,12 +96,295 @@ const doctor = {
 } as unknown as DiagnosticsSnapshot;
 
 describe('device view', () => {
-  it('projects status and doctor without inferring a missing verdict', () => {
+  it('projects every RuntimeObservation branch without inferring absent fields', () => {
     const view = deviceView(status, doctor);
     expect(view.doctor.worst).toBe('warn');
     expect(view.clockSkew).toEqual(doctor.clockSkew);
-    expect(view.runtimes.map(runtime => runtime.verdict)).toEqual(['warn', undefined]);
-    expect(view.runtimes[1]).toMatchObject({ present: false, reason: 'not_found' });
+
+    const byId = Object.fromEntries(view.runtimes.map(runtime => [runtime.id, runtime]));
+    expect(byId.claude).toEqual({
+      id: 'claude',
+      present: true,
+      outcome: 'available',
+      version: '2.1.0',
+      verdict: 'allow',
+      authPresent: true,
+      executablePath: '/usr/local/bin/claude',
+      executableSource: 'path',
+    });
+    expect(byId.codex).toEqual({
+      id: 'codex',
+      present: true,
+      outcome: 'available',
+      version: '0.50.0',
+      authPresent: false,
+    });
+    expect('verdict' in byId.codex!).toBe(false);
+    expect(byId.opencode).toEqual({
+      id: 'opencode',
+      present: true,
+      outcome: 'available',
+      version: '0.9.0',
+    });
+    expect('authPresent' in byId.opencode!).toBe(false);
+    expect(byId.grok).toEqual({
+      id: 'grok',
+      present: false,
+      outcome: 'timeout',
+    });
+    expect('authPresent' in byId.grok!).toBe(false);
+    expect(byId.pi).toEqual({
+      id: 'pi',
+      present: true,
+      outcome: 'available',
+      version: '1.3.0',
+      verdict: 'warn',
+      qualifiedVersion: '1.2.0',
+      upgrade: { state: 'available', installedVersion: '1.3.0', qualifiedVersion: '1.4.0', command: 'npm i -g pi' },
+    });
+    expect(byId.dsh).toEqual({
+      id: 'dsh',
+      present: true,
+      outcome: 'available',
+      version: '0.1.0',
+      verdict: 'block',
+    });
+    expect(byId.agy).toEqual({
+      id: 'agy',
+      present: false,
+      outcome: 'not-found',
+    });
+    expect(byId['refused-rt']).toEqual({
+      id: 'refused-rt',
+      present: false,
+      outcome: 'refused',
+      reason: 'app_server_unavailable',
+    });
+  });
+
+  it('re-probes configured adapters only when checkAuth is true and keeps timeout distinct', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'device-check-auth-'));
+    const detectClaude = vi.fn<RuntimeAdapter['detect']>().mockResolvedValue({
+      kind: 'available',
+      version: '2.1.0',
+      authPresent: true,
+      executablePath: '/opt/bin/claude',
+      executableSource: 'path',
+    });
+    const detectSlow = vi.fn<RuntimeAdapter['detect']>(
+      (signal?: AbortSignal) => new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+    );
+    const adapters: RuntimeAdapter[] = [
+      {
+        descriptor: {
+          id: 'claude',
+          selectionModes: ['subscription'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: detectClaude,
+      } as unknown as RuntimeAdapter,
+      {
+        descriptor: {
+          id: 'codex',
+          selectionModes: ['subscription'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: detectSlow,
+      } as unknown as RuntimeAdapter,
+    ];
+    const daemon = {
+      status: () => ({
+        ...status,
+        runtimes: [
+          { id: 'claude', present: true, outcome: 'available', version: '2.1.0', authPresent: false, steer: true, resume: true },
+          { id: 'codex', present: true, outcome: 'available', version: '0.50.0', authPresent: false, steer: true, resume: true },
+        ],
+      }),
+    } as unknown as Daemon;
+    const config = {
+      productId: 'test',
+      productName: 'Test',
+      deviceName: 'Test',
+      serverUrl: 'http://127.0.0.1:1',
+      storeDir,
+    } as DaemonConfig;
+    const settings = deviceSettings(daemon, config, adapters, {
+      adapters: [],
+      runtimeProbeTimeoutMs: 40,
+    });
+
+    const initial = await settings.device();
+    expect(detectClaude).not.toHaveBeenCalled();
+    expect(detectSlow).not.toHaveBeenCalled();
+    expect(initial.runtimes.find(r => r.id === 'claude')?.authPresent).toBe(false);
+
+    const noProbe = await settings.device({ checkAuth: false });
+    expect(detectClaude).not.toHaveBeenCalled();
+    expect(noProbe.runtimes.find(r => r.id === 'claude')?.authPresent).toBe(false);
+
+    const reprobed = await settings.device({ checkAuth: true });
+    expect(detectClaude).toHaveBeenCalledOnce();
+    expect(detectSlow).toHaveBeenCalledOnce();
+    expect(reprobed.runtimes.find(r => r.id === 'claude')).toMatchObject({
+      present: true,
+      outcome: 'available',
+      authPresent: true,
+      executablePath: '/opt/bin/claude',
+      executableSource: 'path',
+    });
+    expect(reprobed.runtimes.find(r => r.id === 'codex')).toEqual({
+      id: 'codex',
+      present: false,
+      outcome: 'timeout',
+    });
+  });
+
+  it('skips Pi full detection on checkAuth and keeps its existing observation', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'device-skip-pi-'));
+    const detectPi = vi.fn<RuntimeAdapter['detect']>().mockResolvedValue({
+      kind: 'available',
+      version: '9.9.9',
+      authPresent: true,
+    });
+    const detectClaude = vi.fn<RuntimeAdapter['detect']>().mockResolvedValue({
+      kind: 'available',
+      version: '2.1.0',
+      authPresent: true,
+    });
+    const adapters: RuntimeAdapter[] = [
+      {
+        descriptor: {
+          id: 'pi',
+          selectionModes: ['byok-profile'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: detectPi,
+      } as unknown as RuntimeAdapter,
+      {
+        descriptor: {
+          id: 'claude',
+          selectionModes: ['subscription'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: detectClaude,
+      } as unknown as RuntimeAdapter,
+    ];
+    const daemon = {
+      status: () => ({
+        ...status,
+        runtimes: [
+          { id: 'pi', present: true, outcome: 'available', version: '1.3.0', authPresent: false, steer: true, resume: true },
+          { id: 'claude', present: true, outcome: 'available', version: '2.1.0', authPresent: false, steer: true, resume: true },
+        ],
+      }),
+    } as unknown as Daemon;
+    const config = {
+      productId: 'test',
+      productName: 'Test',
+      deviceName: 'Test',
+      serverUrl: 'http://127.0.0.1:1',
+      storeDir,
+    } as DaemonConfig;
+    const settings = deviceSettings(daemon, config, adapters, {
+      adapters: [],
+      runtimeProbeTimeoutMs: 500,
+    });
+
+    const reprobed = await settings.device({ checkAuth: true });
+    expect(detectPi).not.toHaveBeenCalled();
+    expect(detectClaude).toHaveBeenCalledOnce();
+    expect(reprobed.runtimes).toHaveLength(2);
+    expect(reprobed.runtimes[0]).toEqual({ id: 'pi', present: true, outcome: 'available', version: '1.3.0', authPresent: false });
+    expect(reprobed.runtimes[1]).toMatchObject({ id: 'claude', present: true, outcome: 'available', version: '2.1.0', authPresent: true });
+  });
+
+  it('cancels an in-flight checkAuth recheck on Host shutdown with method_failed before draining RPCs', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'device-shutdown-store-'));
+    const hostStorageRoot = await mkdtemp(path.join(tmpdir(), 'device-shutdown-host-'));
+    let probeStarted!: () => void;
+    const started = new Promise<void>(resolve => { probeStarted = resolve; });
+    let probeAborted = false;
+    const adapters: RuntimeAdapter[] = [
+      {
+        descriptor: {
+          id: 'claude',
+          selectionModes: ['subscription'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: (signal?: AbortSignal) => new Promise((_resolve, reject) => {
+          probeStarted();
+          signal?.addEventListener('abort', () => {
+            probeAborted = true;
+            reject(new Error('aborted'));
+          });
+        }),
+      } as unknown as RuntimeAdapter,
+    ];
+    const daemon = {
+      status: () => ({
+        ...status,
+        runtimes: [
+          { id: 'claude', present: true, outcome: 'available', version: '2.1.0', authPresent: false, steer: true, resume: true },
+        ],
+      }),
+    } as unknown as Daemon;
+    const daemonConfig: DaemonConfig = {
+      productId: 'test',
+      productName: 'Test',
+      deviceName: 'Test',
+      serverUrl: 'http://127.0.0.1:1',
+      storeDir,
+      runtimeAllowlist: [],
+      localAgentRelease: { version: '0.0.1' },
+    };
+    const shutdown = new AbortController();
+    const domain = await createSettingsDomain({
+      daemon,
+      daemonConfig,
+      adapters,
+      shutdownSignal: shutdown.signal,
+      hostStorageRoot,
+    } as unknown as HostContext);
+
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const replies: Array<{ id: number; result?: unknown; error?: { code: string; message: string } }> = [];
+    const lines = createInterface({ input: output });
+    lines.on('line', line => replies.push(JSON.parse(line) as (typeof replies)[number]));
+
+    const inflight = new Set<Promise<unknown>>();
+    const track = (handler: (params: unknown) => unknown) => (params: unknown) => {
+      const call = Promise.resolve().then(() => handler(params));
+      inflight.add(call);
+      call.then(() => inflight.delete(call), () => inflight.delete(call));
+      return call;
+    };
+    const serving = serveBridge({
+      greeted: () => {},
+      methods: {
+        'settings.device': track(domain.handlers['settings.device'] as (params: unknown) => unknown),
+      } as never,
+      shutdown: async () => {
+        shutdown.abort();
+        await Promise.allSettled(inflight);
+      },
+    }, { input, output });
+
+    input.write(encodeMessage({ id: 1, method: 'hello', params: { bridgeVersion: BRIDGE_VERSION } }));
+    input.write(encodeMessage({ id: 2, method: 'settings.device', params: { checkAuth: true } }));
+    await started;
+
+    input.write(encodeMessage({ id: 3, method: 'shutdown' }));
+    await serving;
+
+    expect(probeAborted).toBe(true);
+    expect(replies.find(reply => reply.id === 2)).toEqual({
+      id: 2,
+      error: { code: 'method_failed', message: 'Host is shutting down' },
+    });
+    expect(replies.find(reply => reply.id === 3)).toEqual({ id: 3, result: null });
   });
 });
 
@@ -69,8 +425,11 @@ describe('tray menu', () => {
 describe('settings domain', () => {
   it('validates renderer params and persists dreaming under the Host directory', async () => {
     const hostStorageRoot = await mkdtemp(path.join(tmpdir(), 'settings-domain-'));
-    const { handlers } = await createSettingsDomain({ hostStorageRoot } as HostContext);
+    const { handlers } = await createSettingsDomain({ hostStorageRoot, adapters: [] } as unknown as HostContext);
     expect(await handlers['settings.get'](undefined)).toEqual(DEFAULT_SETTINGS);
+    await expect(handlers['settings.device']({ checkAuth: 'yes' } as unknown as undefined)).rejects.toMatchObject({ code: 'invalid_params' });
+    await expect(handlers['settings.device']({ extra: true } as unknown as undefined)).rejects.toMatchObject({ code: 'invalid_params' });
+    await expect(handlers['settings.device'](['bad'] as unknown as undefined)).rejects.toMatchObject({ code: 'invalid_params' });
     await expect(handlers['settings.setDreaming']({ enabled: 'on', models: [] })).rejects.toMatchObject({ code: 'invalid_params' });
     await expect(handlers['settings.setDreaming']({ enabled: true, models: ['a', 'a'] })).rejects.toMatchObject({ code: 'invalid_params' });
     await handlers['settings.setDreaming']({ enabled: false, models: ['cheap'] });

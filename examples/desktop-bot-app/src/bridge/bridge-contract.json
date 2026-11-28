@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "bridgeVersion": 3,
+  "bridgeVersion": 4,
   "ipcChannel": "byok:bridge",
   "stateHintChannel": "byok:state-changed",
   "coreMethods": [
