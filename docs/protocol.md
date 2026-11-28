@@ -291,6 +291,7 @@ The `WireAddition` table covers server-to-daemon capability flags and uses
 | --- | --- |
 | (every offer) | `agent-home-contract` |
 | `requiredToolsets` | `toolset-selection` |
+| `requiredSkills` | `skill-selection` |
 | `homeAccess` | `agent-home-readers` |
 | `agentMemory` | `agent-memory-selection` |
 | `agentMemory: 'read-if-admitted'` | `agent-memory-read-if-admitted` |
@@ -748,7 +749,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]` (at most 64 device flags), `deviceId`, `productId`, `clientVersion?`, `harnesses`, `runtimeUnavailable?` (additive — §11.4.1), `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
-| `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `agentMemoryCommit?` (§2.2), `nativeSessions?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `target` (required; see below), `terminalProjection?`, `limits?` (`maxDurationMs?` only), `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
+| `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `agentMemoryCommit?` (§2.2), `nativeSessions?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `requiredSkills?`, `target` (required; see below), `terminalProjection?`, `limits?` (`maxDurationMs?` only), `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
@@ -783,9 +784,9 @@ plaintext branches.
 **`task.offer` rules.** The plaintext and the sealed branch share these
 cross-field rules (`offerRule`, `packages/protocol/src/messages.ts`):
 
-- A prepared offer (`preparation`) carries no `instruction`, has
-  `session.mode: 'fresh'`, carries an `egressPolicy`, and selects a prepared
-  `agentMemory` mode (`none`, `read` or `read-write`).
+- A prepared offer (`preparation`) carries no `instruction`, `images`, or
+  `requiredSkills`, has `session.mode: 'fresh'`, carries an `egressPolicy`, and
+  selects a prepared `agentMemory` mode (`none`, `read` or `read-write`).
 - A plaintext offer that is not prepared carries an `instruction`. A sealed
   offer carries it in `sealed` or in plaintext, as its `sealing` says (§2.5).
 - A fresh or prepared offer carries an `egressPolicy`.
@@ -1107,6 +1108,22 @@ configuration also loads; Codex gets them in the `thread/start` or
 `thread/resume` config (`mcp_servers`); Pi starts them from its task-scoped
 pool.
 
+**An Agent offer's `requiredSkills` names the Host skills the task needs.** It
+carries only 1–16 unique bounded lowercase logical ids (`SkillIdSchema`, same
+pattern as `ToolsetIdSchema`); local filesystem paths, pack names, and skill
+contents never cross the wire. The field is gated on the device's
+`skill-selection` capability (`WIRE_ADDITIONS`) on both plaintext and sealed
+offers: the server and hosted cloud refuse an offer carrying `requiredSkills`
+before creating the task unless the target device durably advertises
+`skill-selection`. No `configuredSkills` inventory is carried on `conn.hello`
+or presence in v1; per-runtime support travels in `RuntimeCapabilities.skills`.
+Prepared offers structurally refuse `requiredSkills` in `offerRule`
+(`AgentInputPreparationPayloadSchema` carries no `requiredSkills`), and
+`nativeSessions` forbids `requiredSkills` through `offerSelectionViolation`
+(`native_sessions_selection_invalid`). Before claim, the daemon resolves and
+projects every requested id from one bytes-locked local registry snapshot and
+requires the selected runtime to declare `skills: true`.
+
 **No offer carries a workspace hint.** The reserved `workspaceHint` existed
 only on the runtime-only offers that v4 removed; no reader ever consumed it.
 An Agent Attempt's working directory follows from the Agent home and
@@ -1254,7 +1271,7 @@ integers and `fromMs <= toMs`. The offer selection rule
 `target` (lane `harness`, `harnessId: 'pi'`, selection `byok-profile`), a
 fresh session, `agentMemory: 'none'`, and `terminalProjection` absent or
 `{ mode: 'none' }`. It rejects any `agentMemoryCommit`, `homeAccess`, `preparation`,
-`requiredToolsets` or `messageEgress`. An `auto` or `harness` target does not
+`requiredToolsets`, `requiredSkills` or `messageEgress`. An `auto` or `harness` target does not
 qualify. The Host offer schemas refuse
 such a plain or sealed payload before conditional resolution; the wire decoder
 accepts it, and a device declines it non-retryably. The wire-addition
@@ -1766,7 +1783,8 @@ daemon-to-server task-output branches need no flag: the server accepts them by
 the task's frozen `sealing` (the offer receipt; #1573). A sealed branch shares
 every other row of its type, and a field it moves or drops is absent from it,
 so sealing never removes a gate the same fields would need: `requiredToolsets`
-on a sealed offer still needs `toolset-selection`. A sealed task output that
+on a sealed offer still needs `toolset-selection`, and `requiredSkills` still
+needs `skill-selection`. A sealed task output that
 names its ciphertext blob (`sealed.ciphertextRef`) needs no flag either. The
 split table marks `task.progress` and `task.await_approval` `inlineOnly`, so
 their sealed branches are always inline. A daemon that receives a sealed offer
@@ -2655,7 +2673,7 @@ rule is appended at the end only.
 | --- | --- | --- | --- |
 | 1 | `agent_memory_selection_invalid` | `homeAccess: 'memory-reader'` with `agentMemory` `read-write` or `read-write-if-admitted` | `['agentMemory']` |
 | 2 | `agent_memory_selection_invalid` | `homeAccess: 'memory-reader'` with `agentMemoryCommit` | `['agentMemoryCommit']` |
-| 3 | `native_sessions_selection_invalid` | `nativeSessions` without an explicit Pi target (`lane: 'harness'`, `harnessId: 'pi'`, `selection.mode: 'byok-profile'`), then with a session that is not fresh, `agentMemory` other than `none` (or absent), a `terminalProjection` other than `none`, or any of `agentMemoryCommit`, `homeAccess`, `preparation`, `requiredToolsets`, `messageEgress`, checked in that order | `['target']`, else the first such field |
+| 3 | `native_sessions_selection_invalid` | `nativeSessions` without an explicit Pi target (`lane: 'harness'`, `harnessId: 'pi'`, `selection.mode: 'byok-profile'`), then with a session that is not fresh, `agentMemory` other than `none` (or absent), a `terminalProjection` other than `none`, or any of `agentMemoryCommit`, `homeAccess`, `preparation`, `requiredToolsets`, `requiredSkills`, `messageEgress`, checked in that order | `['target']`, else the first such field |
 
 v7 deleted the rules `runtime_selection_mismatch` and
 `harness_selection_conflict`: with one `target` union, the disagreements they
@@ -4310,7 +4328,7 @@ same flag. §1.3.1 states its rules.
 `capabilities` object (`RuntimeCapabilitiesSchema`):
 
 ```
-{ steer?, resume?, approvalInteractive?, mcpToolsets?, messageDraft?,
+{ steer?, resume?, approvalInteractive?, mcpToolsets?, skills?, messageDraft?,
   toolAuthorizationAuto?, durableLane?, preparedLane?,
   isolation?: { userInstructions?, userOutputStyle?, userMemory?, userSkills?,
                userHookContext?, userMcpServers?, sessionPersistence? } }

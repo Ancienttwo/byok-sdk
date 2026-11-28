@@ -107,6 +107,8 @@ export const RuntimeCapabilitiesSchema = z.object({
   approvalInteractive: z.boolean().optional(),
   /** Whether this runtime can project a locally configured MCP toolset into one task. */
   mcpToolsets: z.boolean().optional(),
+  /** Whether this runtime can project locally configured skills into one task. */
+  skills: z.boolean().optional(),
   messageDraft: z.boolean().optional(),
   /** The capability matrix (#1103): what the runtime's adapter descriptor declares. Discovery data, not a gate. */
   toolAuthorizationAuto: z.boolean().optional(),
@@ -205,6 +207,21 @@ export const ToolsetIdSchema = z
   .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u, 'toolset ids must be lowercase logical identifiers');
 export type ToolsetId = z.infer<typeof ToolsetIdSchema>;
 
+/** Maximum logical skills one daemon may configure in its local skill registry. */
+export const CONFIGURED_SKILLS_MAX_ITEMS = 64;
+
+/**
+ * Logical, host-owned skill identifier. A task may request this name, but the
+ * local path or installed skill pack behind it exists only in the daemon's
+ * local configuration and never crosses the SaaS wire.
+ */
+export const SkillIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u, 'skill ids must be lowercase logical identifiers');
+export type SkillId = z.infer<typeof SkillIdSchema>;
+
 /** Stable Agent identity carried across transport and storage. */
 export const AGENT_REF_MAX_BYTES = 160;
 const AGENT_REF_VALUE = z
@@ -241,18 +258,26 @@ export const AgentHomeProjectionAgentRefSchema = AgentRefSchema.extend({
   profileRevision: AgentHomeProjectionProfileRevisionSchema,
 }).strict();
 
+function rejectDuplicateLogicalIds(
+  ids: readonly string[],
+  ctx: z.RefinementCtx,
+  label: string,
+): void {
+  const seen = new Set<string>();
+  for (const [index, id] of ids.entries()) {
+    if (seen.has(id)) {
+      ctx.addIssue({ code: 'custom', path: [index], message: `duplicate ${label}: ${id}` });
+    }
+    seen.add(id);
+  }
+}
+
 function rejectDuplicateToolsets(
   ids: readonly string[],
   ctx: z.RefinementCtx,
   label: 'configured' | 'required',
 ): void {
-  const seen = new Set<string>();
-  for (const [index, id] of ids.entries()) {
-    if (seen.has(id)) {
-      ctx.addIssue({ code: 'custom', path: [index], message: `duplicate ${label} toolset: ${id}` });
-    }
-    seen.add(id);
-  }
+  rejectDuplicateLogicalIds(ids, ctx, `${label} toolset`);
 }
 
 /**
@@ -421,6 +446,13 @@ export const RequiredToolsetsSchema = z
   .max(16)
   .superRefine((ids, ctx) => rejectDuplicateToolsets(ids, ctx, 'required'));
 
+/** Every named skill is required; duplicates are rejected instead of silently de-duplicated. */
+export const RequiredSkillsSchema = z
+  .array(SkillIdSchema)
+  .min(1)
+  .max(16)
+  .superRefine((ids, ctx) => rejectDuplicateLogicalIds(ids, ctx, 'required skill'));
+
 /**
  * How an Agent Attempt uses its Agent home. `memory-reader` runs the Attempt
  * in its own run directory, `<home>/.byok/runs/<taskId>/`, beside other
@@ -496,6 +528,7 @@ const OFFER_FIELDS = {
     .refine(window => window.fromMs <= window.toMs, { message: 'nativeSessions requires fromMs <= toMs' }).optional(),
   homeAccess: AgentHomeAccessSchema.optional(),
   requiredToolsets: RequiredToolsetsSchema.optional(),
+  requiredSkills: RequiredSkillsSchema.optional(),
   target: ExecutionTargetSchema,
   terminalProjection: TerminalProjectionSelectionSchema.optional(),
   limits: z
@@ -511,6 +544,7 @@ const OFFER_FIELDS = {
 type OfferRuleInput = {
   readonly instruction?: unknown;
   readonly images?: unknown;
+  readonly requiredSkills?: unknown;
   readonly session: SessionSelection;
   readonly preparation?: unknown;
   readonly agentMemory?: AgentMemorySelection;
@@ -522,9 +556,10 @@ type OfferRuleInput = {
 /**
  * The cross-field rules of a `task.offer`, for `superRefine`:
  *
- * - A prepared offer (`preparation`) carries neither `instruction` nor `images`.
- *   The frozen envelope in the prepared record already owns the request. It
- *   never resumes, and it selects a prepared `agentMemory` mode.
+ * - A prepared offer (`preparation`) carries neither `instruction`, `images`,
+ *   nor `requiredSkills`. The frozen envelope in the prepared record already
+ *   owns the request. It never resumes, and it selects a prepared `agentMemory`
+ *   mode.
  * - A plaintext offer that is not prepared carries an `instruction`. A sealed
  *   offer's instruction is checked by {@link sealedOfferRule}.
  * - A fresh or prepared offer carries an `egressPolicy`; `messageEgress` needs one.
@@ -533,10 +568,11 @@ type OfferRuleInput = {
  * Structural rules live here; a violation stops the receiving cursor. Semantic cross-field rules live only in `offerSelectionViolation`, which the Host offer schemas and the daemon both run.
  */
 function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boolean): void {
-  const { instruction, images, session, preparation, agentMemory, egressPolicy, messageEgress, routineRef } = payload;
+  const { instruction, session, preparation, agentMemory, egressPolicy, messageEgress, routineRef } = payload;
   if (preparation !== undefined) {
-    if (instruction !== undefined) ctx.addIssue({ code: 'custom', path: ['instruction'], message: 'a prepared offer carries no instruction' });
-    if (images !== undefined) ctx.addIssue({ code: 'custom', path: ['images'], message: 'a prepared offer carries no images' });
+    for (const field of ['instruction', 'images', 'requiredSkills'] as const) {
+      if (payload[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message: `a prepared offer carries no ${field}` });
+    }
     if (session.mode !== 'fresh') ctx.addIssue({ code: 'custom', path: ['session'], message: 'a prepared offer never resumes' });
     if (!PreparedAgentMemoryModeSchema.safeParse(agentMemory).success) {
       ctx.addIssue({ code: 'custom', path: ['agentMemory'], message: 'a prepared offer selects a prepared agentMemory mode' });
@@ -581,6 +617,7 @@ export function offerSelectionViolation(payload: {
   readonly terminalProjection?: { readonly mode: string };
   readonly preparation?: unknown;
   readonly requiredToolsets?: unknown;
+  readonly requiredSkills?: unknown;
   readonly messageEgress?: unknown;
   readonly target?: { readonly lane: string; readonly runtimeId?: string };
 }): OfferSelectionViolation | undefined {
@@ -600,7 +637,7 @@ export function offerSelectionViolation(payload: {
     if (payload.terminalProjection !== undefined && payload.terminalProjection.mode !== 'none') {
       return { rule, path: ['terminalProjection'], message: 'nativeSessions forbids terminal projection' };
     }
-    for (const field of ['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'messageEgress'] as const) {
+    for (const field of ['agentMemoryCommit', 'homeAccess', 'preparation', 'requiredToolsets', 'requiredSkills', 'messageEgress'] as const) {
       if (payload[field] !== undefined) return { rule, path: [field], message: `nativeSessions forbids ${field}` };
     }
   }

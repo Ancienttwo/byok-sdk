@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { INPUT_IMAGES_CAPABILITY, WIRE_ADDITIONS, ExecutionTargetSchema, createEnvelope, isServerToDaemonType, requiredReceiverCapabilities, type HarnessInfo, type MessageType, type TaskSteerSealedPayload } from '@byok-sdk/protocol';
+import { INPUT_IMAGES_CAPABILITY, SKILL_SELECTION_CAPABILITY, WIRE_ADDITIONS, ExecutionTargetSchema, createEnvelope, isServerToDaemonType, requiredReceiverCapabilities, type HarnessInfo, type MessageType, type TaskSteerSealedPayload } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput } from '../agent-execution';
@@ -153,6 +153,7 @@ const hostedFresh = [
     mediaType: 'image/png',
     blob: { blobId: 'fresh-image', contentHash: `sha256:${'a'.repeat(64)}`, size: 32, contentType: 'image/png' },
   }] } },
+  { field: 'requiredSkills', flag: SKILL_SELECTION_CAPABILITY, fields: { requiredSkills: ['review'] } },
 ] satisfies { field: string; flag: string; fields: Partial<AgentExecutionInput['payload']> }[];
 
 const hostedFreshCases = hostedFresh.map(({ field, flag, fields }) => {

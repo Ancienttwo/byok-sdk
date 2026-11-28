@@ -2724,6 +2724,100 @@ because native acceptance cannot be recalled or ruled out by aborting the CLI.
 Loopback Codex endpoints retain the native local-process trust boundary; the
 relay adds no authentication to them. The Pi RPC binding is specified below; Claude notification remains deferred.
 
+## Task-scoped skills
+
+A SaaS task may require one or more host-configured skills without putting
+local paths, pack names, or skill files on the SaaS wire. The Agent offer names
+them in its optional `requiredSkills` field: 1–16 unique logical `SkillId`
+values (`1–128` characters, `/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/u`, the same
+vocabulary as `ToolsetId`). The field is a gated wire addition: the server and
+hosted cloud send it only to a device that durably advertises `skill-selection`
+and refuse the task before attempt or mailbox creation otherwise. Sealed offers
+keep `requiredSkills` visible in plaintext and still require `skill-selection`.
+
+In v1 the wire carries no `configuredSkills` inventory on `conn.hello` or
+presence; it carries only the `skill-selection` device capability flag and the
+per-runtime `RuntimeCapabilities.skills` bit (`conn.hello`, presence
+`PresenceRuntimeCapabilities`, and `task.claim`). Local hosts inspect and
+update the registry through `Daemon.status().skills` and
+`Daemon.reloadSkills(...)`.
+
+### Local skill registry and bytes-locked snapshot
+
+The device operator configures logical ids in `DaemonConfig.skills:
+Record<SkillId, SkillSource>` (at most `CONFIGURED_SKILLS_MAX_ITEMS = 64`),
+where each `SkillSource` is either `{ path }` (an absolute path to a `SKILL.md`
+file or skill directory) or `{ pack }` (an installed skill-pack name). Registry
+construction and reload are synchronous so `createDaemon` stays synchronous;
+same-content reload is a no-op and an invalid reload keeps the previous
+snapshot.
+
+Skill content follows the skill-pack content-only rules everywhere: `SKILL.md`
+frontmatter declares only `name` and `description`; executable, entrypoint,
+hook, environment, credential, and allowed-tools fields are rejected; and
+relative-path safety plus per-file and total byte caps are enforced where bytes
+are read.
+
+Each validated registry snapshot locks the actual bytes to project, not mutable
+names: every resolved skill records its canonical relative file list, per-file
+SHA-256 and byte length, and an aggregate content hash. A `{ pack }` source
+pins the exact installed content-hash revision directory
+(`<dataDir>/skill-packs/<name>/<content-hash>/`), never the mutable name lock.
+The registry revision changes only when effective content changes. Retention of
+older pack revisions is unchanged in v1; if a pinned directory is removed
+outside the daemon, pre-claim projection declines.
+
+### Pre-claim admission, projection, and lane rules
+
+Before claiming an offer carrying `requiredSkills`, the daemon resolves every
+requested id from one registry snapshot and checks that the selected runtime
+declares `descriptor.capabilities.skills === true`. A missing id or a runtime
+without `skills` declines non-retryably before claim; there is no fallback to a
+skill-less runtime.
+
+Pre-claim projection (async) copies each resolved skill from the admitted
+snapshot into a task-scoped directory under `<index>-<id>` subdirectories (so
+no Windows reserved device name becomes a directory segment), re-verifying
+every file's byte length and SHA-256 against the snapshot. Missing or modified
+bytes decline non-retryably before claim rather than running new content under
+an earlier snapshot's revision. The daemon passes `{ id, name, description, dir }[]`
+to the adapter at start. Under a file-scoped offer, an optional read-only
+`skills` root (`id: 'skills'`, `access: 'read'`, reserved id) exposes the
+projected directory in `home` and `workspaces` modes, is forbidden in `memory`
+mode, and enters the grant digest. User-level skills keep loading beside Host
+skills; `isolation.userSkills` stays a fixed adapter fact with no per-task wire
+field.
+
+- **Prepared offers** structurally refuse `requiredSkills` in one place: the
+  protocol `offerRule` (`a prepared offer carries no requiredSkills`), and
+  `AgentInputPreparationPayloadSchema` carries no `requiredSkills`.
+- **Native sessions** (`nativeSessions`) refuse `requiredSkills` through
+  `offerSelectionViolation` (`native_sessions_selection_invalid`).
+- **Durable lane** refuses `requiredSkills` before claim via
+  `PI_DURABLE_RUNTIME_CAPABILITIES.skills = false`.
+
+### Runtime support and migration
+
+v1 ships the ordinary Pi RPC lane as the only `skills: true` runtime (mounted
+per operation via `additionalSkillPaths`). Claude, Codex, and every other
+bundled runtime report `skills: false` until the adapter has an explicit
+task-scoped seam and a runtime-contract positive control proving a selected
+skill reaches the model and an unselected one does not (the #1846 rule).
+
+There is no compatibility path for the older skill seams:
+`runtimes.pi.agentSkillPaths` and `PiAdapterOptions.agentSkillPaths` are
+removed (a Host wanting a skill in every task lists it in its templates), and
+`projectSkillPack` folds into pre-claim projection while `installSkillPacks`
+continues to populate the store referenced by `{ pack }` sources.
+
+### K8 Bot skills
+
+In `@byok-sdk/bot-collaboration`, `BotProfile.skills` is Host-owned only (Main
+Bot LLM actions do not gain a `skills` field). When assembling a task offer, a
+model template's `requiredSkills` and the Bot's `skills` merge as a
+deduplicated union with template entries first; a merged list above 16 ids is
+refused.
+
 ## Task-scoped host MCP toolsets
 
 A SaaS task may require one or more host-integrated tools without making the

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
-import { HARNESS_SERVICE_TIER_CAPABILITY, RESULT_SCHEMA_MAX_BYTES, checkResultSchema } from '@byok-sdk/protocol';
+import { HARNESS_SERVICE_TIER_CAPABILITY, RESULT_SCHEMA_MAX_BYTES, SKILL_SELECTION_CAPABILITY, checkResultSchema } from '@byok-sdk/protocol';
 import { AgentExecutionInputSchema } from '../agent-execution';
 import { TEST_HARNESSES, TENANT_A, createHarness } from './support/harness';
 
@@ -255,6 +255,49 @@ describe('fresh Agent execution submission', () => {
         payload: { ...payload, requiredToolsets: ['example.tools'], terminalProjection: { mode: 'none' } } });
       await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate))
         .rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining('toolset-selection') });
+      await expectNothingWritten(harness, device.deviceId);
+    });
+
+    it('refuses requiredSkills without the skill-selection capability and admits it once advertised', async () => {
+      const { harness, device, payload } = await setup(BASE_CAPABILITIES);
+      const candidate = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId,
+        payload: { ...payload, requiredSkills: ['review'], terminalProjection: { mode: 'none' } } });
+      await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate))
+        .rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining(SKILL_SELECTION_CAPABILITY) });
+      await expectNothingWritten(harness, device.deviceId);
+
+      await harness.stores.devices.recordCapabilities(TENANT_A, {
+        deviceId: device.deviceId,
+        capabilities: [...BASE_CAPABILITIES, SKILL_SELECTION_CAPABILITY],
+        harnesses: TEST_HARNESSES,
+      });
+      const offered = await harness.cloud.submitAgentExecution(TENANT_A, candidate);
+      expect(offered.envelope.payload).toMatchObject({ requiredSkills: ['review'] });
+    });
+
+    it('refuses requiredSkills on enqueuePreparedOffer via protocol offerRule before reads or writes', async () => {
+      const { harness, device, payload } = await setup([...BASE_CAPABILITIES, SKILL_SELECTION_CAPABILITY, 'agent-input-preparation-v9']);
+      const getDevice = vi.spyOn(harness.stores.devices, 'get');
+      const record = vi.spyOn(harness.stores.receipts, 'record');
+      const { instruction: _instruction, ...rest } = payload;
+      const call = harness.cloud.enqueuePreparedOffer(TENANT_A, device.deviceId, {
+        taskId: input.taskId,
+        payload: {
+          ...rest,
+          session: { mode: 'fresh' },
+          preparation: { reference: 'prepared-1', requestDigest: 'digest-1' },
+          agentMemory: 'none',
+          requiredSkills: ['review'],
+        } as never,
+      });
+      await expect(call).rejects.toBeInstanceOf(ZodError);
+      await expect(call).rejects.toMatchObject({
+        issues: expect.arrayContaining([
+          { code: 'custom', path: ['requiredSkills'], message: 'a prepared offer carries no requiredSkills' },
+        ]),
+      });
+      expect(getDevice).not.toHaveBeenCalled();
+      expect(record).not.toHaveBeenCalled();
       await expectNothingWritten(harness, device.deviceId);
     });
 

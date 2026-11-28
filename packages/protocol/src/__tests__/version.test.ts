@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITY_FLAGS, PROTOCOL_VERSION, WIRE_ADDITIONS } from '../index';
+import { CAPABILITY_FLAGS, PROTOCOL_VERSION, SKILL_SELECTION_CAPABILITY, WIRE_ADDITIONS } from '../index';
 
 describe('protocol version and capability flags', () => {
   it('PROTOCOL_VERSION is 8', () => {
@@ -18,7 +18,8 @@ describe('protocol version and capability flags', () => {
     expect(WIRE_ADDITIONS.filter((entry) => entry.surface === 'task.approval_resolved')).toEqual([]);
   });
 
-  it('keeps the MCP toolset gate', () => {
+  it('keeps the MCP toolset and skill selection gates', () => {
     expect(CAPABILITY_FLAGS).toContain('toolset-selection');
+    expect(CAPABILITY_FLAGS).toContain(SKILL_SELECTION_CAPABILITY);
   });
 });

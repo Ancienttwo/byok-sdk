@@ -1137,6 +1137,7 @@ export interface PresenceRuntimeCapabilities {
     readonly resume?: boolean;
     readonly approvalInteractive?: boolean;
     readonly mcpToolsets?: boolean;
+    readonly skills?: boolean;
     readonly messageDraft?: boolean;
     readonly toolAuthorizationAuto?: boolean;
     readonly durableLane?: boolean;

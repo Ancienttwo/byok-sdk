@@ -22,6 +22,7 @@ import type {
   TaskFailureReading,
   TaskState,
   ToolsetId,
+  SkillId,
   TerminalProjectionSelection,
   TerminalAgentHomeMemoryChange,
   AgentHomeAccess,
@@ -168,6 +169,8 @@ interface DispatchInputBase {
   deviceId: string;
   /** Logical device-local MCP toolsets required for this task; never executable definitions. */
   requiredToolsets?: ToolsetId[];
+  /** Logical device-local skills required for this task; never local paths or pack contents. */
+  requiredSkills?: SkillId[];
   /**
    * An explicit, consumed Agent egress policy. It travels on the distinct
    * egress-aware Agent offer.

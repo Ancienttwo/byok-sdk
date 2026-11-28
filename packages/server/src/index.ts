@@ -596,7 +596,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     input: DispatchInput,
   ): Promise<TaskHandle> {
     const { sessionRef, agentRef, egressPolicy, messageEgress, terminalProjection,
-      homeAccess, agentMemory, agentMessageContext, target, requiredToolsets } = input;
+      homeAccess, agentMemory, agentMessageContext, target, requiredToolsets, requiredSkills } = input;
     if (messageEgress === undefined && agentMessageContext !== undefined) {
       throw new ByokCloudError('coordination_input_invalid', 'agentMessageContext requires messageEgress');
     }
@@ -634,6 +634,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
               ...(agentMemory === undefined ? {} : { agentMemory }),
               ...(messageEgress === undefined ? {} : { messageEgress }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+              ...(requiredSkills === undefined ? {} : { requiredSkills }),
             },
             ...(agentMessageContext === undefined ? {} : { agentMessageContext }),
           });
@@ -648,6 +649,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
             ...(homeAccess === undefined ? {} : { homeAccess }),
             ...(agentMemory === undefined ? {} : { agentMemory }),
             ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
+            ...(requiredSkills === undefined ? {} : { requiredSkills }),
           },
         });
       })();

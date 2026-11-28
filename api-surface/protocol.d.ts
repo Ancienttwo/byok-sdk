@@ -171,6 +171,7 @@
 //   BotTurnOutcomeFragments -> dist/bot-turn-outcome.d.ts
 //   BotTurnOutcomeSchemaError -> dist/bot-turn-outcome.d.ts
 //   CAPABILITY_FLAGS -> dist/version.d.ts
+//   CONFIGURED_SKILLS_MAX_ITEMS -> dist/messages.d.ts
 //   CONFIGURED_TOOLSETS_MAX_ITEMS -> dist/messages.d.ts
 //   CONN_HELLO_CAPABILITIES_MAX_ITEMS -> dist/messages.d.ts
 //   CONTENT_HASH_RE -> dist/blob.d.ts
@@ -350,6 +351,7 @@
 //   RUNTIME_UNAVAILABLE_CAUSES -> dist/constants.d.ts
 //   ReasoningEffort -> dist/messages.d.ts
 //   ReasoningEffortSchema -> dist/messages.d.ts
+//   RequiredSkillsSchema -> dist/messages.d.ts
 //   RequiredToolsetsSchema -> dist/messages.d.ts
 //   ResultIssue -> dist/result-schema.d.ts
 //   ResultSchema -> dist/result-schema.d.ts
@@ -377,6 +379,7 @@
 //   SEALED_PAYLOAD_VERSION -> dist/sealed-payload.d.ts
 //   SEALED_SPLIT_TABLE -> dist/sealed-split-table.d.ts
 //   SERVER_TO_DAEMON_TYPES -> dist/messages.d.ts
+//   SKILL_SELECTION_CAPABILITY -> dist/capability-constants.d.ts
 //   STEER_REFUSAL_REASONS -> dist/messages.d.ts
 //   SealableMessageType -> dist/sealed-split-table.d.ts
 //   SealedDeclineCode -> dist/sealed-payload.d.ts
@@ -391,6 +394,8 @@
 //   SelectionModeSchema -> dist/messages.d.ts
 //   SessionSelection -> dist/messages.d.ts
 //   SessionSelectionSchema -> dist/messages.d.ts
+//   SkillId -> dist/messages.d.ts
+//   SkillIdSchema -> dist/messages.d.ts
 //   SteerRefusalReason -> dist/messages.d.ts
 //   SteerRefusalReasonReading -> dist/messages.d.ts
 //   TASK_EXECUTION_OPTIONS_CAPABILITY -> dist/capability-constants.d.ts
@@ -556,6 +561,7 @@
 //   RuntimeUnavailableCause -> dist/constants.d.ts
 //   SEALED_PAYLOAD_CAPABILITY -> dist/capability-constants.d.ts
 //   SEALED_PAYLOAD_V2_CAPABILITY -> dist/capability-constants.d.ts
+//   SKILL_SELECTION_CAPABILITY -> dist/capability-constants.d.ts
 //   TASK_EXECUTION_OPTIONS_CAPABILITY -> dist/capability-constants.d.ts
 //   TASK_FAIL_REASON_MAX_BYTES -> dist/failure-reason.d.ts
 //   TASK_STATES -> dist/task-state.d.ts
@@ -2060,6 +2066,7 @@ export declare const HARNESS_SERVICE_TIER_CAPABILITY: 'harness-service-tier';
 export declare const HARNESS_SERVICE_TIER_MAX_LENGTH = 64;
 export declare const HARNESS_SERVICE_TIER_TOKEN: RegExp;
 export declare const INPUT_IMAGES_CAPABILITY: 'input-images';
+export declare const SKILL_SELECTION_CAPABILITY: 'skill-selection';
 // ==== @byok-sdk/protocol dist/codec.d.ts ====
 import type { z } from 'zod';
 import { type Envelope } from './envelope.js';
@@ -2482,6 +2489,7 @@ export declare const HostOfferPlainPayloadSchema: z.ZodObject<{
     }>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    requiredSkills: z.ZodOptional<z.ZodArray<z.ZodString>>;
     target: z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"auto">;
     }, z.core.$strict>, z.ZodObject<{
@@ -2613,6 +2621,7 @@ export declare const HostOfferSealedPayloadSchema: z.ZodObject<{
     }>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    requiredSkills: z.ZodOptional<z.ZodArray<z.ZodString>>;
     target: z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"auto">;
     }, z.core.$strict>, z.ZodObject<{
@@ -2839,6 +2848,7 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
             resume: z.ZodOptional<z.ZodBoolean>;
             approvalInteractive: z.ZodOptional<z.ZodBoolean>;
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+            skills: z.ZodOptional<z.ZodBoolean>;
             messageDraft: z.ZodOptional<z.ZodBoolean>;
             toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
             durableLane: z.ZodOptional<z.ZodBoolean>;
@@ -3556,10 +3566,10 @@ export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_ISSUES_MAX_CO
 export type { ResultSchema, ResultIssue, } from './result-schema.js';
 export { TASK_STATES, TASK_TRANSITIONS, } from './task-state.js';
 export type { TaskState } from './task-state.js';
-export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, HarnessIdSchema, HarnessInventorySchema, HarnessSelectionSchema, SelectionModeSchema, harnessSupportsTarget, harnessSelectionNeedsModel, type DefaultModelSelectionMode, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, ExecutionTargetSchema, ReasoningEffortSchema, INPUT_IMAGE_MAX_BYTES, InputImageBlobRefSchema, InputImagesSchema, ClaimedExecutorSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, CONN_HELLO_CAPABILITIES_MAX_ITEMS, AgentMemoryCommitSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskSteerSealedPayloadSchema, TASK_STEER_TEXT_MAX_BYTES, TaskSteerRefusedPayloadSchema, STEER_REFUSAL_REASONS, readSteerRefusalReason, TaskClaimPayloadSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, DECLINE_CODES, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, targetsPi, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, TerminalResidentMemoryOverLimitSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, offerSelectionViolation, } from './messages.js';
+export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, HarnessIdSchema, HarnessInventorySchema, HarnessSelectionSchema, SelectionModeSchema, harnessSupportsTarget, harnessSelectionNeedsModel, type DefaultModelSelectionMode, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, ExecutionTargetSchema, ReasoningEffortSchema, INPUT_IMAGE_MAX_BYTES, InputImageBlobRefSchema, InputImagesSchema, ClaimedExecutorSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, SkillIdSchema, RequiredSkillsSchema, CONFIGURED_SKILLS_MAX_ITEMS, CONN_HELLO_CAPABILITIES_MAX_ITEMS, AgentMemoryCommitSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskSteerSealedPayloadSchema, TASK_STEER_TEXT_MAX_BYTES, TaskSteerRefusedPayloadSchema, STEER_REFUSAL_REASONS, readSteerRefusalReason, TaskClaimPayloadSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, DECLINE_CODES, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, targetsPi, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, TerminalResidentMemoryOverLimitSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, offerSelectionViolation, } from './messages.js';
 export { steerRefusalEnvelopeId, uuidFromSha256 } from './steer-refusal.js';
 export { PAIR_DEVICE_DIGEST_NAMESPACE, PairDeviceDigestSchema, pairDeviceDigest, type PairDeviceDigestInput, } from './pair-device-digest.js';
-export type { MessageType, RuntimeId, HarnessSelection, SelectionMode, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, ExecutionTarget, ReasoningEffort, InputImageBlobRef, ClaimedExecutor, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessagePublishPlainPayload, AgentMessagePublishSealedPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskSteerRefusedPayload, SteerRefusalReason, SteerRefusalReasonReading, TaskClaimPayload, OfferAdmissionTimings, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, TaskArtifactPayload, TaskFailPayload, RuntimeFailureClass, RuntimeQuotaScope, TaskFailure, TaskFailureReading, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, TerminalResidentMemoryOverLimit, AgentHomeAccess, AgentMemorySelection, AgentMemoryCommit, } from './messages.js';
+export type { MessageType, RuntimeId, HarnessSelection, SelectionMode, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, ExecutionTarget, ReasoningEffort, InputImageBlobRef, ClaimedExecutor, ToolsetId, SkillId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessagePublishPlainPayload, AgentMessagePublishSealedPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskSteerRefusedPayload, SteerRefusalReason, SteerRefusalReasonReading, TaskClaimPayload, OfferAdmissionTimings, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, TaskArtifactPayload, TaskFailPayload, RuntimeFailureClass, RuntimeQuotaScope, TaskFailure, TaskFailureReading, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, TerminalResidentMemoryOverLimit, AgentHomeAccess, AgentMemorySelection, AgentMemoryCommit, } from './messages.js';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope.js';
 export type { Envelope } from './envelope.js';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, ProtocolNegotiationError, } from './errors.js';
@@ -4069,6 +4079,7 @@ export declare const RuntimeCapabilitiesSchema: z.ZodObject<{
     resume: z.ZodOptional<z.ZodBoolean>;
     approvalInteractive: z.ZodOptional<z.ZodBoolean>;
     mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+    skills: z.ZodOptional<z.ZodBoolean>;
     messageDraft: z.ZodOptional<z.ZodBoolean>;
     toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
     durableLane: z.ZodOptional<z.ZodBoolean>;
@@ -4120,6 +4131,7 @@ export declare const HarnessInfoSchema: z.ZodObject<{
         resume: z.ZodOptional<z.ZodBoolean>;
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+        skills: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
         toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
         durableLane: z.ZodOptional<z.ZodBoolean>;
@@ -4170,6 +4182,7 @@ export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
         resume: z.ZodOptional<z.ZodBoolean>;
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+        skills: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
         toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
         durableLane: z.ZodOptional<z.ZodBoolean>;
@@ -4233,6 +4246,9 @@ export type RuntimeUnavailableEntry = z.infer<typeof RuntimeUnavailableEntrySche
 export declare const CONFIGURED_TOOLSETS_MAX_ITEMS = 64;
 export declare const ToolsetIdSchema: z.ZodString;
 export type ToolsetId = z.infer<typeof ToolsetIdSchema>;
+export declare const CONFIGURED_SKILLS_MAX_ITEMS = 64;
+export declare const SkillIdSchema: z.ZodString;
+export type SkillId = z.infer<typeof SkillIdSchema>;
 export declare const AGENT_REF_MAX_BYTES = 160;
 export declare const AgentRefSchema: z.ZodObject<{
     agentId: z.ZodString;
@@ -4262,6 +4278,7 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             resume: z.ZodOptional<z.ZodBoolean>;
             approvalInteractive: z.ZodOptional<z.ZodBoolean>;
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+            skills: z.ZodOptional<z.ZodBoolean>;
             messageDraft: z.ZodOptional<z.ZodBoolean>;
             toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
             durableLane: z.ZodOptional<z.ZodBoolean>;
@@ -4434,6 +4451,7 @@ export declare const ClaimedExecutorSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type ClaimedExecutor = z.infer<typeof ClaimedExecutorSchema>;
 export declare const RequiredToolsetsSchema: z.ZodArray<z.ZodString>;
+export declare const RequiredSkillsSchema: z.ZodArray<z.ZodString>;
 // support
 export declare const AgentHomeAccessSchema: z.ZodLiteral<"memory-reader">;
 export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
@@ -4482,6 +4500,7 @@ export declare function offerSelectionViolation(payload: {
     };
     readonly preparation?: unknown;
     readonly requiredToolsets?: unknown;
+    readonly requiredSkills?: unknown;
     readonly messageEgress?: unknown;
     readonly target?: {
         readonly lane: string;
@@ -4535,6 +4554,7 @@ export declare const TaskOfferPlainPayloadSchema: z.ZodObject<{
     }, z.core.$strict>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    requiredSkills: z.ZodOptional<z.ZodArray<z.ZodString>>;
     target: z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"auto">;
     }, z.core.$strict>, z.ZodObject<{
@@ -4666,6 +4686,7 @@ export declare const TaskOfferSealedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    requiredSkills: z.ZodOptional<z.ZodArray<z.ZodString>>;
     target: z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"auto">;
     }, z.core.$strict>, z.ZodObject<{
@@ -4845,6 +4866,7 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
     }, z.core.$strict>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    requiredSkills: z.ZodOptional<z.ZodArray<z.ZodString>>;
     target: z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"auto">;
     }, z.core.$strict>, z.ZodObject<{
@@ -4974,6 +4996,7 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
     }, z.core.$strict>>;
     homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    requiredSkills: z.ZodOptional<z.ZodArray<z.ZodString>>;
     target: z.ZodDiscriminatedUnion<[z.ZodObject<{
         lane: z.ZodLiteral<"auto">;
     }, z.core.$strict>, z.ZodObject<{
@@ -5622,6 +5645,7 @@ export declare const TaskClaimPayloadSchema: z.ZodObject<{
         resume: z.ZodOptional<z.ZodBoolean>;
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
+        skills: z.ZodOptional<z.ZodBoolean>;
         messageDraft: z.ZodOptional<z.ZodBoolean>;
         toolAuthorizationAuto: z.ZodOptional<z.ZodBoolean>;
         durableLane: z.ZodOptional<z.ZodBoolean>;
@@ -7383,7 +7407,7 @@ export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelec
 export declare const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export declare const PROTOCOL_VERSION = 8;
 export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
-export declare const CAPABILITY_FLAGS: readonly ['toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "host-mcp-task-context", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", "agent-memory-commit-on-success", "native-sessions", "sealed-payload-v1", "sealed-payload-v2", "input-images", "harness-service-tier"];
+export declare const CAPABILITY_FLAGS: readonly ['toolset-selection', 'agent-home-contract', "agent-home-readers", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-home-projection-host-revision", "agent-input-preparation-v9", "host-mcp-task-context", "provider-provisioning.v1", "agent-memory-intent.v1", "agent-memory-selection", "agent-memory-read-if-admitted", "agent-memory-read-write-if-admitted", "agent-memory-commit-on-success", "native-sessions", "sealed-payload-v1", "sealed-payload-v2", "input-images", "harness-service-tier", "skill-selection"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
 // ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
 import type { MessageType } from './messages.js';

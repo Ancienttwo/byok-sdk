@@ -205,7 +205,7 @@ describe('Host offer selection admission (#1671)', () => {
     ['agentMemory', { ...native, agentMemory: 'read' }, 'nativeSessions needs agentMemory none', nativeRule],
     ['agentMemory', { ...native, agentMemory: undefined }, 'nativeSessions needs agentMemory none', nativeRule],
     ['terminalProjection', { ...native, terminalProjection: corpusOffers.find(p => (p.terminalProjection as Json)?.mode === 'result-document')!.terminalProjection }, 'nativeSessions forbids terminal projection', nativeRule],
-    ...(['agentMemoryCommit', 'homeAccess', 'requiredToolsets', 'messageEgress'] as const).map(field =>
+    ...(['agentMemoryCommit', 'homeAccess', 'requiredToolsets', 'requiredSkills', 'messageEgress'] as const).map(field =>
       [field, { ...native, [field]: corpusOffers.find(p => p[field] !== undefined)![field] }, `nativeSessions forbids ${field}`, nativeRule] as const),
     // Every rule fails at once: only the first, in the docs/protocol.md §3.2 order, is reported.
     ['agentMemory', { ...native, homeAccess: 'memory-reader', agentMemory: 'read-write', target: { lane: 'auto' } }, 'agentMemory read-write requires a writer; a memory-reader Attempt reads memory only', 'agent_memory_selection_invalid'],
