@@ -3,4 +3,4 @@ export {
   suggestedVersions as suggestedRuntimeVersions,
   parseSuggestedVersions as parseSuggestedRuntimeVersions,
   checkSuggestedVersion,
-} from '../../vendor/oar/223703d/suggested-versions.js';
+} from '../../vendor/oar/19f1ecc/suggested-versions.js';

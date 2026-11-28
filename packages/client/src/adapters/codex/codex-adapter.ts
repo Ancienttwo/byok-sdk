@@ -577,7 +577,7 @@ export class CodexAdapter implements RuntimeAdapter {
           const native = recordOf(cause?.native);
           const unknownTier = cause?.method === method && native?.code === -32_600 && typeof native.message === 'string'
             && native.message.startsWith(`Invalid request: unknown variant \`${serviceTier}\`, expected `);
-          // OAR 0.138.1 uses a plain Error for a successful reply with unacceptable readback.
+          // OAR uses a plain Error for a successful reply with unacceptable readback.
           const readbackMismatch = error.message.startsWith(`codex ${method} reports serviceTier `)
             && error.message.endsWith(' was requested');
           if (unknownTier || readbackMismatch) {

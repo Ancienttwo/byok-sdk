@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "9b58a89a7a8bc1723454da822dbed191d82fe1aa6fd4d9791960bd30dddec0a1"
+    "snapshotSha256": "02316892807d1e7c464e258bc79d5002be10f83f3ebeb6b16a98f4f582dd37a7"
   },
   "configFields": {
     "status": "tracked",
@@ -25,11 +25,11 @@
       ]
     },
     {
-      "id": "pi-161-closure",
+      "id": "pi-170-closure",
       "impact": "breaking",
       "acceptance": "accept",
-      "summary": "Re-prepare Pi inputs for the 1.6.1 closure and replace removed model IDs in the pinned keys catalog. Pi-durable 1.6.0 SQLite replicas open in place.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#pi-161-closure",
+      "summary": "Re-prepare Pi inputs and rebind Host accounting rulings for the 1.7.0 closure. Replace removed model IDs in the pinned keys catalog. Pi-durable 1.6.0 and 1.6.1 SQLite replicas open in place.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-170-closure-2585",
       "items": [
         "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
         "store:pi-durable"
@@ -327,7 +327,7 @@
     {
       "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
       "change": "changed",
-      "entry": "pi-161-closure"
+      "entry": "pi-170-closure"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
@@ -538,8 +538,8 @@
       "item": "store:pi-durable",
       "change": "changed",
       "before": "@earendil-works/pi-durable@1.6.0",
-      "after": "@earendil-works/pi-durable@1.6.1",
-      "entry": "pi-161-closure"
+      "after": "@earendil-works/pi-durable@1.7.0",
+      "entry": "pi-170-closure"
     },
     {
       "item": "union:agent-event#service_tier",

@@ -109,9 +109,9 @@ test('a bin API entry selects the package that declares the bin; an undeclared b
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
 });
 test('reviewed vendor and registry paths map explicitly, siblings still refuse', () => {
-  assert.ok(selectImpact(['packages/client/vendor/oar/223703d/runtimes/grok/session.ts']).dirs.includes('packages/client'));
+  assert.ok(selectImpact(['packages/client/vendor/oar/19f1ecc/runtimes/grok/session.ts']).dirs.includes('packages/client'));
   assert.deepEqual(selectImpact(['scripts/release/registry-contract.test.mjs', 'scripts/release/registry-expectations.json']).dirs, []);
-  assert.throws(() => selectImpact(['packages/client/vendor/oar/223703d/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/19f1ecc/unreviewed.ts']));
   assert.throws(() => selectImpact(['scripts/release/registry-contract.mjs']));
 });
 test('CLI and aggregate revalidate content against the same trusted comparison base', t => {

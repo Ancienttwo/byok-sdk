@@ -18,7 +18,7 @@ import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
-import type { RawEvent } from '../../vendor/oar/223703d/contracts/session';
+import type { RawEvent } from '../../vendor/oar/19f1ecc/contracts/session';
 import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
 import { observeAdmissionDetection } from '../runtime-detection';
 

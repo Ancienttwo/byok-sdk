@@ -47,7 +47,7 @@ checks the running model's image support before delivery.
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | Cursor | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.18` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `unqualified (fake-CLI)` | `2.3.0` | `1.6.1` | `1.6.1` |
+| Qualified version (PR CI) | — | `1.5.18` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `unqualified (fake-CLI)` | `2.3.0` | `1.7.0` | `1.7.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
 | Image input declared by descriptor | `images` | no | no | no | no | no | no | no | yes | no |
@@ -75,7 +75,7 @@ adapter's support for task-scoped toolsets.
 | Runtime | Ordinary search qualification |
 | --- | --- |
 | dsh | `0.2.2-rc.1` on macOS arm64, SDK-built, `sandbox: 'danger-full-access'`, `BYOK_DSH_BIN` executable source, Node distribution helper and SDK authorization `all` |
-| Pi | `1.6.1` on macOS arm64, SDK-built, `agentUserContext: 'inherit'`, default SDK launcher and bundled Pi entry, Node distribution helper and SDK authorization `auto` or `all` |
+| Pi | `1.7.0` on macOS arm64, SDK-built, `agentUserContext: 'inherit'`, default SDK launcher and bundled Pi entry, Node distribution helper and SDK authorization `auto` or `all` |
 | Claude, Codex, Grok, agy, Cursor, OpenCode 1.x and 2.x | Closed |
 
 The [runtime evidence](researches/2026-11-19-mcp-search-runtime-qualification.md)
@@ -661,7 +661,7 @@ task's and the SDK's MCP servers. It changes MCP servers only; the user's
 `AGENTS.md` still loads unless `agentUserContext` is also `excluded`. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
-[vendored session](../packages/client/vendor/oar/223703d/PROVENANCE.md):
+[vendored session](../packages/client/vendor/oar/19f1ecc/PROVENANCE.md):
 
 - Before the thread opens, `config/read` for the task cwd lists the servers of
   the user and project `config.toml` layers. Each one that is not a task
@@ -717,7 +717,7 @@ ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
 does not provide a hidden-terminal mode; see the [qualified observation and
 limits](researches/2026-10-28-grok-terminal-capability-boundary.md).
 
-The [vendored launch profile](../packages/client/vendor/oar/223703d/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/19f1ecc/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -902,7 +902,7 @@ file does not disable the normal resource loader or all ambient context sources.
 Credential custody and environment filtering also do not establish prompt
 isolation: the allowlisted environment retains home/config discovery paths.
 
-Pi 1.6.1 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
+Pi 1.7.0 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
 `~/.pi/agent`. From it, Pi loads a context file (`AGENTS.override.md`,
 `AGENTS.md` or `CLAUDE.md`), `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions,
 prompts, themes and skills. It also loads skills from `~/.agents/skills`. The
@@ -921,7 +921,7 @@ same rule as Claude. Under `excluded` the settings are not project-trusted
 `.pi/SYSTEM.md` does not load either.
 
 On the ordinary RPC lane Pi declares all five user-context bits for
-`excluded`. The runtime contract suite checks three at Pi 1.6.1 with markers
+`excluded`. The runtime contract suite checks three at Pi 1.7.0 with markers
 that appear when inherited and are absent under `excluded`:
 
 - `userInstructions`: `AGENTS.md`, `SYSTEM.md` and `APPEND_SYSTEM.md` in the
@@ -931,7 +931,7 @@ that appear when inherited and are absent under `excluded`:
 - `userHookContext`: a user extension in `<agentDir>/extensions/` that adds a
   `before_agent_start` message.
 
-`userOutputStyle` and `userMemory` read `yes (no source)`: Pi 1.6.1 has a fixed
+`userOutputStyle` and `userMemory` read `yes (no source)`: Pi 1.7.0 has a fixed
 system-prompt preamble with no style setting (themes only color the UI and the
 HTML export), and no native memory. The same cases show that Host-authorized
 `agentSkillPaths` and `agentExtensionPaths` still reach the model under
@@ -1062,13 +1062,13 @@ What the upstream runtimes offer that the SDK does not use:
 
 - Codex: the 0.164.0 app-server schema has `ephemeral` on `thread/start` (a
   thread that "should not be materialized on disk"), and `codex exec --help`
-  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/223703d/runtimes/codex/open.ts)
+  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/19f1ecc/runtimes/codex/open.ts)
   does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread
   leaves the other `CODEX_HOME` files alone.
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
   keys of its agent-mode guide have none. From the 1.0.62 guide and local
   folders; not probed with an SDK session or on 1.0.52.
-- Pi: Pi 1.6.1 has `SessionManager.inMemory` and the CLI flag `--no-session`
+- Pi: Pi 1.7.0 has `SessionManager.inMemory` and the CLI flag `--no-session`
   ("Don't save session (ephemeral)"). The SDK
   [host](../packages/client/src/bin/pi-session-runtime.ts) opens a saved session
   and accepts no such flag.
@@ -1169,7 +1169,7 @@ and adding persona text alone does not establish isolation.
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/223703d`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/19f1ecc`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 

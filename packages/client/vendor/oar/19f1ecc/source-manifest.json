@@ -2,21 +2,21 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.138.1",
+  "packageVersion": "0.140.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "223703d364b8724cdf58691d1770c75eaaa10b9f",
+  "commit": "19f1ecc6956251fbdbc3cfbd8eaaa0ffcf5d91b2",
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
-    "branch": "byok/0.138.1",
-    "commit": "a5e1eacd4c51c79f824162656695528b556fb249"
+    "branch": "byok/0.140.0",
+    "commit": "6800dbe0e7efa6d5ef8a9e516d070f1b906aa295"
   },
   "release": {
     "ecosystem": "npm",
     "name": "@botiverse/oar",
-    "version": "0.138.1",
-    "integrity": "sha512-C+mJgkwLXXcH6Vfi1bCIZuU6Aj1Lgkq7EfDyECYy1GFt85BcZ6sYAw5I4IZzMqk8MxdPtSSwI5Mx5FpfwbQzjg==",
-    "gitCommit": "223703d364b8724cdf58691d1770c75eaaa10b9f",
-    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.138.1"
+    "version": "0.140.0",
+    "integrity": "sha512-6SNIRRvAsHzbmJUOLUj5nuwOO57t2RWuc5fOcjJsNopIIRI2sQEuys6rgZLtAfMTPpkzXoqj6I0EMlfaMR4oHw==",
+    "gitCommit": "19f1ecc6956251fbdbc3cfbd8eaaa0ffcf5d91b2",
+    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.140.0"
   },
   "license": "Apache-2.0",
   "files": [
