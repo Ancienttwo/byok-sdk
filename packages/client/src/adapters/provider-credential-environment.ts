@@ -29,6 +29,18 @@ export const PI_AMBIENT_CREDENTIAL_ENV_NAMES = Object.freeze([
  */
 export const CODEX_AUTH_ENV_NAMES = Object.freeze(['CODEX_API_KEY', 'CODEX_ACCESS_TOKEN'] as const);
 
+/** Cursor CLI auth and endpoint overrides. CLI-owned login discovery is separate. */
+export const CURSOR_AUTH_ENV_NAMES = Object.freeze([
+  'CURSOR_API_KEY',
+  'CURSOR_AUTH_TOKEN',
+  'CURSOR_API_ENDPOINT',
+  'CURSOR_WEBSITE_URL',
+  'CURSOR_API_BASE_URL',
+  'CURSOR_API_URL',
+  'CURSOR_BACKEND_URL',
+  'CURSOR_LOCAL_AGENT_API_KEY',
+] as const);
+
 /**
  * Provider credential names. The Pi BYOK key lanes and the Pi MCP servers
  * must not inherit them (BYOK key custody): every name the pinned pi reads for
@@ -39,12 +51,23 @@ export const PROVIDER_CREDENTIAL_ENV_DENY_NAMES: readonly string[] = Object.free
   ...PI_PROVIDER_ENV_KEY_NAMES,
   ...PI_AMBIENT_CREDENTIAL_ENV_NAMES,
   ...CODEX_AUTH_ENV_NAMES,
+  ...CURSOR_AUTH_ENV_NAMES,
   'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_CUSTOM_HEADERS',
   PI_PROJECTED_KEY_ENV,
 ]);
 
 const credentialNames = new Set<string>(PROVIDER_CREDENTIAL_ENV_DENY_NAMES);
+const cursorAuthNames = new Set<string>(CURSOR_AUTH_ENV_NAMES);
+
+export function isCursorAuthEnvironmentName(name: string): boolean {
+  return cursorAuthNames.has(name.toUpperCase());
+}
+
+/** Node serializes environment entries as name=value, so separators in names are unsafe. */
+export function isChildEnvironmentName(name: string): boolean {
+  return name.length !== 0 && !/[=\0]/u.test(name);
+}
 
 /** Return a copy that cannot pass ambient provider credentials to a child. */
 export function withoutProviderCredentials(env: Readonly<Record<string, string>>): Record<string, string>;
@@ -53,7 +76,7 @@ export function withoutProviderCredentials(env: NodeJS.ProcessEnv): NodeJS.Proce
   const sanitized = { ...env };
   // Match Windows case aliases too.
   for (const name of Object.keys(sanitized)) {
-    if (credentialNames.has(name.toUpperCase())) delete sanitized[name];
+    if (!isChildEnvironmentName(name) || credentialNames.has(name.toUpperCase())) delete sanitized[name];
   }
   return sanitized;
 }

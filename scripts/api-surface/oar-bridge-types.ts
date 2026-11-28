@@ -189,7 +189,11 @@ type AcpBridgeSession = {
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, keyof OarStartErrorClasses | 'AcpError' | 'grokSession' | 'antigravitySession' | 'opencodeSession' | 'grokSessionCapabilities' | 'antigravitySessionCapabilities' | 'opencodeSessionCapabilities' | 'grokListModels' | 'grokAccountUsage' | 'antigravityListModels'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, keyof OarStartErrorClasses | 'AcpError' | 'grokSession' | 'antigravitySession' | 'opencodeSession' | 'grokSessionCapabilities' | 'antigravitySessionCapabilities' | 'opencodeSessionCapabilities' | 'grokListModels' | 'grokAccountUsage' | 'antigravityListModels' | 'cursorSession' | 'cursorListModels'>>;
+import type { cursorSession as CursorSessionImplementation } from '../../packages/client/src/runtime/cursor-acp-profile.js';
+import type { cursorListModels as CursorListModelsImplementation } from '../../packages/client/src/runtime/cursor-list-models.js';
+export type CheckCursorSessionBridge = Assert<Assignable<typeof CursorSessionImplementation, AcpBridge.StartCursorAcpSession>>;
+export type CheckCursorListModelsBridge = Assert<Equal<typeof CursorListModelsImplementation, typeof AcpBridge.cursorListModels>>;
 export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
 export type CheckAcpUnsupportedOption = Assert<Assignable<VendorUnsupportedOptionError, AcpBridge.UnsupportedOptionError>>;

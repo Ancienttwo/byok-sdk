@@ -102,13 +102,17 @@ for (const relativePath of [adaptersExport.import, adaptersExport.types]) {
 const bundledEntry = readFileSync(new URL('../dist/adapters/index.js', import.meta.url), 'utf8');
 assert.doesNotMatch(bundledEntry, /(?:from|import\()\s*["']ws["']/);
 assert.doesNotMatch(bundledEntry, /ws-transport|createDaemon/);
+assert.doesNotMatch(bundledEntry, /@cursor\/sdk/);
+assert.doesNotMatch(JSON.stringify(manifest), /@cursor\/sdk/);
 
 const adapters = await import(new URL('../dist/adapters/index.js', import.meta.url));
 const root = await import(new URL('../dist/index.js', import.meta.url));
 assert.deepEqual(
   Object.keys(adapters).sort(),
-  ['AgyAdapter', 'ClaudeAdapter', 'CodexAdapter', 'DshAdapter', 'GrokAdapter', 'NativeInteractionController', 'NativeInteractionError', 'OpenCodeAdapter', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeEnvironmentUnavailableError', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnvironment', 'createExecutionScratch', 'createRuntimeAdapters', 'delegateAdmissionDetection', 'isWireRuntimeId', 'observeRuntimeDetection', 'projectRuntimeObservation', 'taskRuntimeTarget', 'validateRuntimeDetectResult'],
+  ['AgyAdapter', 'ClaudeAdapter', 'CodexAdapter', 'CursorAdapter', 'DshAdapter', 'GrokAdapter', 'NativeInteractionController', 'NativeInteractionError', 'OpenCodeAdapter', 'PI_PACKAGE_NAME', 'PiAdapter', 'RuntimeDisposalFailure', 'RuntimeEnvironmentUnavailableError', 'RuntimeExecutionFailure', 'RuntimeStartupDisposalFailure', 'ScratchRootPathError', 'buildRuntimeEnvironment', 'createExecutionScratch', 'createRuntimeAdapters', 'delegateAdmissionDetection', 'isWireRuntimeId', 'observeRuntimeDetection', 'projectRuntimeObservation', 'taskRuntimeTarget', 'validateRuntimeDetectResult'],
 );
+assert.equal(new adapters.CursorAdapter().descriptor.id, 'cursor');
+assert.equal(new root.CursorAdapter().descriptor.id, 'cursor');
 // The public testing entry is transport-free too: a Host test must not load the daemon.
 const bundledTesting = readFileSync(new URL('../dist/testing/index.js', import.meta.url), 'utf8');
 assert.doesNotMatch(bundledTesting, /(?:from|import\()\s*["']ws["']/);

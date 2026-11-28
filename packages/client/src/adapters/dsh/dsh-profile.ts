@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isCursorAuthEnvironmentName } from '../provider-credential-environment.js';
 import type { DshModelSelection, DshSandboxMode } from './dsh-adapter.js';
 
 const SANDBOX_MODES: readonly DshSandboxMode[] = ['danger-full-access', 'workspace-write', 'read-only'];
@@ -67,7 +68,7 @@ export function dshAgentsHome(root: string): string {
 export function dshEnvironment(base: Readonly<Record<string, string | undefined>>, root: string, sandbox: DshSandboxMode): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(base)) {
-    if (value !== undefined && !/^DSH_/i.test(name) && name.toUpperCase() !== DSH_PROVIDER_KEY_ENV) env[name] = value;
+    if (value !== undefined && !isCursorAuthEnvironmentName(name) && !/^DSH_/i.test(name) && name.toUpperCase() !== DSH_PROVIDER_KEY_ENV) env[name] = value;
   }
   env.DSH_HOME = root;
   env.DSH_AGENTS_HOME = dshAgentsHome(root);

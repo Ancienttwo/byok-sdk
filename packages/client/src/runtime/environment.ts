@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loginShellSnapshot, pinLiveHome, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
+import { isChildEnvironmentName, isCursorAuthEnvironmentName } from '../adapters/provider-credential-environment.js';
 import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.generated.js';
 
 /**
@@ -32,7 +33,8 @@ import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.genera
  * `pass` copies the named variables from the live environment at every build;
  * the hard deny removes `CLAUDECODE` (Claude Code sets it inside its own
  * sessions; a child agent starts as its own top-level session) and `BYOK_*`
- * (this SDK's control-plane variables), whatever listed them; `NO_PROXY` and
+ * (this SDK's control-plane variables), as well as Cursor auth and endpoint
+ * variables, whatever listed them. `NO_PROXY` and
  * `no_proxy` gain `127.0.0.1` and `localhost`, so a user's proxy never takes
  * the traffic to the daemon's loopback gate and MCP servers.
  *
@@ -213,7 +215,7 @@ function admitNames(
   for (const name of names) {
     const value = source[name];
     if (value === undefined || !admitted(name)) continue;
-    if (matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) denied?.add(name);
+    if (!isChildEnvironmentName(name) || matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive) || isCursorAuthEnvironmentName(name)) denied?.add(name);
     else {
       // Use canonical names for SDK reads as well as child lookups.
       // Prefix entries (LC_*, XDG_*) canonicalize the whole name to upper case.
@@ -256,7 +258,7 @@ export type RuntimeEnvironmentConflictRule = (passed: ReadonlySet<string>) => re
  */
 export type RuntimeEnvironmentSource = 'login-shell' | 'windows-session' | 'allowlist' | 'pass' | 'sdk';
 
-/** The rule that kept a name out: the hard deny (`CLAUDECODE`, `BYOK_*`) or the adapter's conflict rule. */
+/** The rule that kept a name out: the shared deny or the adapter's conflict rule. */
 export type RuntimeEnvironmentRemovalRule = 'deny' | 'conflict';
 
 /**

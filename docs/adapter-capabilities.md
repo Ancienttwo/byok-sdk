@@ -40,30 +40,30 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 `yes` describes Agent tasks with that option set.
 
 The image row shows the static adapter descriptor. Runtime detection also
-projects OAR declarations for Codex, Claude, Grok and DSH. Antigravity and
+projects OAR declarations for Codex, Claude, Grok and DSH. Antigravity, Cursor and
 OpenCode negotiate image input when the ACP session opens. Ordinary Pi
 checks the running model's image support before delivery.
 
 <!-- generated:capability-matrix:start -->
-| Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.18` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.6.1` | `1.6.1` |
-| Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
-| Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
-| Image input declared by descriptor | `images` | no | no | no | no | no | no | yes | no |
-| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | no | yes | yes |
-| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no |
-| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | yes | yes |
-| Prepared lane | `preparedLane` | no | no | no | no | no | no | yes | no |
-| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | yes | yes | yes | no | yes | no |
-| Keeps the user output style out | `isolation.userOutputStyle` | yes (no source) | yes | no | yes | no | no | yes (no source) | no |
-| Keeps user-level memory out | `isolation.userMemory` | no | yes | yes | yes (no source) | no | no | yes (no source) | no |
-| Keeps user skills out | `isolation.userSkills` | yes | no | no | yes | no | no | yes | no |
-| Keeps user hook context out | `isolation.userHookContext` | yes | no | no | no | no | no | yes | no |
-| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | no | no | no |
-| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no |
+| Capability | Wire field | agy | Claude | Codex | dsh | Grok | Cursor | OpenCode | Pi | Pi (`durableLane`) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Qualified version (PR CI) | — | `1.5.18` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `unqualified (fake-CLI)` | `2.3.0` | `1.6.1` | `1.6.1` |
+| Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | yes | no |
+| Redirect the active turn | `steer` | yes | no | yes | yes | no | no | no | yes | no |
+| Image input declared by descriptor | `images` | no | no | no | no | no | no | no | yes | no |
+| Display-only message draft | `messageDraft` | no | yes | yes | no | yes | yes | no | yes | yes |
+| Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no | no |
+| Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | no | yes | yes |
+| Prepared lane | `preparedLane` | no | no | no | no | no | no | no | yes | no |
+| Durable worker lane | `durableLane` | no | no | no | no | no | no | no | no | yes |
+| Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | yes | yes | yes | no | no | yes | no |
+| Keeps the user output style out | `isolation.userOutputStyle` | yes (no source) | yes | no | yes | no | no | no | yes (no source) | no |
+| Keeps user-level memory out | `isolation.userMemory` | no | yes | yes | yes (no source) | no | no | no | yes (no source) | no |
+| Keeps user skills out | `isolation.userSkills` | yes | no | no | yes | no | no | no | yes | no |
+| Keeps user hook context out | `isolation.userHookContext` | yes | no | no | no | no | no | no | yes | no |
+| Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | no | no | no | no |
+| Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
 
 ### MCP toolset search
@@ -76,7 +76,7 @@ adapter's support for task-scoped toolsets.
 | --- | --- |
 | dsh | `0.2.2-rc.1` on macOS arm64, SDK-built, `sandbox: 'danger-full-access'`, `BYOK_DSH_BIN` executable source, Node distribution helper and SDK authorization `all` |
 | Pi | `1.6.1` on macOS arm64, SDK-built, `agentUserContext: 'inherit'`, default SDK launcher and bundled Pi entry, Node distribution helper and SDK authorization `auto` or `all` |
-| Claude, Codex, Grok, agy, OpenCode 1.x and 2.x | Closed |
+| Claude, Codex, Grok, agy, Cursor, OpenCode 1.x and 2.x | Closed |
 
 The [runtime evidence](researches/2026-11-19-mcp-search-runtime-qualification.md)
 records the exact launch conditions and the unavailable combinations.
@@ -111,6 +111,46 @@ Bun workflows keep upstream's VM restrictions without Node's permission layer.
 G1 and required child extensions remain; those tool-event checks do not police
 arbitrary JavaScript APIs after a VM escape. Installed-package Node workflows
 retain upstream's permission model. See [Pi subagents](spec.md#pi-subagents).
+
+## Cursor implementation and qualification (#2514)
+
+Enable the opt-in `cursor` harness by listing it in `runtimeAllowlist` or
+by supplying a `CursorAdapter` to an embedded Host. Install Cursor Agent CLI
+and run `cursor-agent login` as the device user. The SDK looks for a Host
+executable override, then `BYOK_CURSOR_BIN`, `cursor-agent` on the runtime
+`PATH`, and `~/.local/bin/cursor-agent`. It starts
+`cursor-agent --force acp` with provider credentials and Cursor auth and
+endpoint overrides stripped, including `CURSOR_WEBSITE_URL`. It uses the CLI's existing login and
+never sends the ACP `authenticate` request. The `device-default` and
+`adapter-model` selections use CLI model configuration and native effort
+readback. Images are negotiated at session open. An unauthenticated model
+read returns `{ kind: 'unauthenticated' }`. Cursor refuses Host-selected
+service tiers and fallback in phase 1.
+
+Phase 1 covers macOS and Linux with a fake Cursor CLI. Windows native
+`.exe` and staged-promotion `.cmd` launchers need separate qualification.
+Cursor inherits the user's rules, skills, hooks, MCP configuration, and
+persisted sessions. All isolation flags are false. Changing the selected
+model or effort can write to `$CURSOR_CONFIG_DIR/cli-config.json` and
+`$CURSOR_CONFIG_DIR/acp-config.json` (default `~/.cursor`). That same
+configuration directory holds the session state used for resume. The CLI's
+own configuration governs auto-update.
+
+Only tool authorization `all` is admitted. Unexpected ACP permission
+requests are cancelled. Cursor runs shell tools in its CLI process tree.
+Reverse terminal requests cannot start an SDK-hosted process. Task-scoped
+stdio MCP servers are forwarded on
+session creation and resume when their environment is empty. Any task MCP
+credentials are refused before launch. Per-tool grants and MCP search
+remain unavailable. Cursor todo, task, and image-generation updates are
+not recorded in phase 1. The ACP client answers those extension requests
+and blocking question and plan requests with method not found.
+
+The SDK owns the ACP process group and observes live descendants before
+cancellation and disposal. On POSIX, Cursor can put shell tool processes
+in separate groups. A detached background process can outlive cleanup if
+it reparents before observation, or if the Host is killed abruptly before
+it observes the process.
 
 ## OpenCode implementation and qualification (#1538)
 
@@ -1498,8 +1538,8 @@ advertises `device-default`, `taskRuntimeTarget(descriptor)` from
 `{ lane: 'harness', harnessId: descriptor.id, selection: { mode: 'device-default' } }`.
 For other advertised modes, the Host supplies the matching selection.
 `descriptor.platforms` lists the supported `process.platform` values:
-Claude, Codex, Pi and agy declare macOS, Linux and Windows; Grok, dsh
-and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
+Claude, Codex, Pi and agy declare macOS, Linux and Windows. Cursor, Grok,
+dsh and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
 restriction. `observeRuntimeDetection` refuses an unsupported platform with
 `platform_unsupported` before `detect()` runs, and `projectRuntimeObservation`
 gives the same fields the daemon emits in its `runtimes-detected` event. Both

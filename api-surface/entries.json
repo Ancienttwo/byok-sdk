@@ -1095,7 +1095,7 @@
   "@byok-sdk/client#byok-acp-runtime": {
     "kind": "imports",
     "policy": {
-      "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
+      "purpose": "Private ACP runtime stack (Grok, agy, OpenCode, Cursor)",
       "budgetBytes": 220860,
       "zod": true,
       "codegen": true,

@@ -168,6 +168,16 @@ describe('BYOK owned line process', () => {
     await expect(new McpStdioClient({ command: '' }, { env: {} }).connect()).rejects.toThrow(/^MCP server failed to spawn: ERR_INVALID_ARG_VALUE$/);
   });
 
+  it('drops malformed terminal env names before validation can quote them', () => {
+    const spawnFn = vi.fn((_command: string, _args: readonly string[], _options: SpawnOptions) => {
+      throw Object.assign(new Error('fixture spawn refusal'), { code: 'EINVAL' });
+    });
+    const start = createOwnedTerminalSpawn({ spawnFn });
+    const env = { 'CURSOR_API_KEY=fake-key': 'value\0tail', VALID_TERMINAL_ENV: 'kept' };
+    expect(() => start(process.execPath, [], { cwd: '.', env, shell: false })).toThrow(/^spawn failed: EINVAL$/);
+    expect(spawnFn.mock.calls[0]?.[2].env).toEqual({ VALID_TERMINAL_ENV: 'kept' });
+  });
+
   it.each([undefined, null, 42, { toString: () => 'fake-key-object' }, Symbol('fake-key')])('uses fixed text for a non-string spawn code (%s)', (code) => {
     const source = Object.assign(new Error('spawn /bin/fake-key failed'), { code, cause: 'fake-key' });
     expect(carriesSecret(source)).toBe(true);

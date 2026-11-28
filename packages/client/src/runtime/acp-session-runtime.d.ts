@@ -5,6 +5,7 @@ import type { ModelReader, UsageReader } from './oar-reader-contract.js';
 export declare const grokListModels: ModelReader;
 export declare const grokAccountUsage: UsageReader;
 export declare const antigravityListModels: ModelReader;
+export declare const cursorListModels: ModelReader;
 // Self-contained: the build copies this declaration to dist for the private `#byok-acp-runtime` import.
 export declare class AcpError extends Error {
   readonly kind: 'timeout' | 'process_exited' | 'startup_directory';
@@ -119,6 +120,14 @@ export declare const antigravitySession: StartAcpSession;
 
 /** Native OpenCode 1 and 2 ACP; requires the installation's probed version. */
 export declare const opencodeSession: StartAcpSession;
+/** BYOK's Cursor profile uses existing CLI login and refuses hosted terminals. */
+export type StartCursorAcpSession = (
+  spawn: Parameters<StartAcpSession>[0],
+  installation: Parameters<StartAcpSession>[2],
+  options: Parameters<StartAcpSession>[3],
+  hooks?: Parameters<StartAcpSession>[4],
+) => ReturnType<StartAcpSession>;
+export declare const cursorSession: StartCursorAcpSession;
 
 export declare class SessionUnavailableError extends Error {
   readonly name: 'SessionUnavailableError';

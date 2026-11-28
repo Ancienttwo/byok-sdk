@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from '../../util/atomic-write.js';
+import { isCursorAuthEnvironmentName } from '../provider-credential-environment.js';
 import type { AgyGeminiProxy } from './agy-gemini-proxy.js';
 
 /** The native settings that select the Gemini provider. They name no auth method. */
@@ -44,7 +45,7 @@ export async function ensureAgyHome(home: string): Promise<void> {
 export function agyEnvironment(base: Readonly<Record<string, string | undefined>>, home: string, proxy?: Pick<AgyGeminiProxy, 'url' | 'token'>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(base)) {
-    if (value !== undefined && !NATIVE_NAMES.test(name) && !OS_HOME_NAMES.test(name)) env[name] = value;
+    if (value !== undefined && !isCursorAuthEnvironmentName(name) && !NATIVE_NAMES.test(name) && !OS_HOME_NAMES.test(name)) env[name] = value;
   }
   env.HOME = home;
   env.USERPROFILE = home;

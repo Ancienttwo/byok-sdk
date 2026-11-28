@@ -1335,6 +1335,16 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.opencode.versionPolicy.warn` | advanced | array |
 | `runtimes.opencode.versionPolicy.block` | advanced | array |
 | `runtimes.opencode.runtimeEnvironment` | advanced | union |
+| `runtimes.cursor` | advanced | object |
+| `runtimes.cursor.model` | advanced | string |
+| `runtimes.cursor.executable` | advanced | string |
+| `runtimes.cursor.versionPolicy` | advanced | object |
+| `runtimes.cursor.versionPolicy.qualifiedVersion` | required when parent is set | string |
+| `runtimes.cursor.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
+| `runtimes.cursor.versionPolicy.allow` | advanced | array |
+| `runtimes.cursor.versionPolicy.warn` | advanced | array |
+| `runtimes.cursor.versionPolicy.block` | advanced | array |
+| `runtimes.cursor.runtimeEnvironment` | advanced | union |
 | `runtimes.agy` | embedded-only | embedded-only |
 | `runtimeEnvironment` | advanced | union |
 | `piByokLauncher` | advanced | object |
@@ -1455,6 +1465,7 @@ Manifest transition: **0.47.1 → 0.47.1**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| cursor-agent-cli | additive | CursorAdapter adds an opt-in Cursor Agent CLI harness on macOS and Linux. It uses the device user's CLI login. Phase 1 has fake-CLI coverage. [Migration](../docs/releases/host-upgrade-next-minor.md#cursor-agent-cli-2514) |
 <!-- generated:migrations:end -->
 
 ## Maintaining this guide

@@ -110,6 +110,8 @@
 //   CopySdkNativeAssetsOptions -> dist/sdk-native-assets.d.ts
 //   CreateServiceLifecycleOptions -> dist/lifecycle/create-service-lifecycle.d.ts
 //   CreateStoredDeviceProofSignerOptions -> dist/daemon/device-proof-signer.d.ts
+//   CursorAdapter -> dist/adapters/cursor/cursor-adapter.d.ts
+//   CursorAdapterOptions -> dist/adapters/cursor/cursor-adapter.d.ts
 //   DAEMON_CONFIG_SCHEMA_VERSION -> dist/daemon/config-schema/schema.generated.d.ts
 //   DAEMON_HALT_REASONS -> dist/daemon/daemon-lifecycle.d.ts
 //   DAEMON_LOG_LIMITS -> dist/lifecycle/service-log.d.ts
@@ -621,6 +623,8 @@
 //   CodexAdapter -> dist/adapters/codex/codex-adapter.d.ts
 //   CodexAdapterOptions -> dist/adapters/codex/codex-adapter.d.ts
 //   CodexSandboxSetting -> dist/adapters/codex/codex-adapter.d.ts
+//   CursorAdapter -> dist/adapters/cursor/cursor-adapter.d.ts
+//   CursorAdapterOptions -> dist/adapters/cursor/cursor-adapter.d.ts
 //   DshAdapter -> dist/adapters/dsh/dsh-adapter.d.ts
 //   DshAdapterOptions -> dist/adapters/dsh/dsh-adapter.d.ts
 //   DshModelSelection -> dist/adapters/dsh/dsh-adapter.d.ts
@@ -927,6 +931,39 @@ export interface ResolvedBin {
     command: string;
     source: 'env' | 'path';
 }
+// ==== @byok-sdk/client dist/adapters/cursor/cursor-adapter.d.ts ====
+import type { spawn as nodeSpawn } from 'node:child_process';
+import { type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
+import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
+import type { ResolvedBin } from '../codex/resolve-bin.js';
+export interface CursorAdapterOptions {
+    model?: string;
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
+    versionPolicy?: RuntimeVersionPolicy;
+    resolveBin?: () => ResolvedBin;
+    nativeAssetRoot?: string;
+    spawnFn?: typeof nodeSpawn;
+    maxRetainedBytes?: number;
+    interruptTimeoutMs?: number;
+}
+export declare class CursorAdapter implements RuntimeAdapter {
+    #private;
+    private readonly options;
+    private readonly environment;
+    private readonly policy?;
+    private readonly maxRetainedBytes;
+    private readonly interruptTimeoutMs;
+    constructor(options?: CursorAdapterOptions);
+    get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
+    runtimeEnvironment(): Promise<import("../index.js").RuntimeEnvironment>;
+    private resolveCommand;
+    listModels(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+    private probe;
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    private start;
+}
 // ==== @byok-sdk/client dist/adapters/dsh/dsh-adapter.d.ts ====
 import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
 import { type spawn as nodeSpawn } from 'node:child_process';
@@ -1043,6 +1080,7 @@ export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnviron
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch.js';
 export type { ExecutionScratch } from '../daemon/retention/scratch.js';
 export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter.js';
+export { CursorAdapter, type CursorAdapterOptions } from './cursor/cursor-adapter.js';
 // ==== @byok-sdk/client dist/adapters/managed-runtime-path.d.ts ====
 export type ManagedRuntimeId = 'claude' | 'codex' | 'dsh' | 'opencode';
 // ==== @byok-sdk/client dist/adapters/opencode/opencode-adapter.d.ts ====
@@ -1208,6 +1246,7 @@ export interface CopyPiRuntimeAssetsOptions {
 }
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/adapters/runtime-adapters.d.ts ====
+import { type CursorAdapterOptions } from './cursor/cursor-adapter.js';
 import { type OpenCodeAdapterOptions } from './opencode/opencode-adapter.js';
 import type { RuntimeAdapter, RuntimeVersionPolicy } from '../types.js';
 import { type RuntimeEnvironmentPolicy } from '../runtime/environment.js';
@@ -1257,6 +1296,12 @@ export interface RuntimeAdaptersRuntimes {
     };
     opencode?: {
         models?: OpenCodeAdapterOptions['models'];
+        executable?: string;
+        versionPolicy?: RuntimeVersionPolicy;
+        runtimeEnvironment?: RuntimeEnvironmentPolicy;
+    };
+    cursor?: {
+        model?: CursorAdapterOptions['model'];
         executable?: string;
         versionPolicy?: RuntimeVersionPolicy;
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -4459,6 +4504,7 @@ export type { AgentMemoryExportOptions } from './daemon/agent-memory-export.js';
 export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, } from './tool-authorization.js';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization.js';
 export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter.js';
+export { CursorAdapter, type CursorAdapterOptions } from './adapters/cursor/cursor-adapter.js';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryMode, TerminalProjectionSelection } from '@byok-sdk/protocol';
 export declare const INPUT_PREPARATION_REQUEST_FORMAT = "byok.input-preparation.request";

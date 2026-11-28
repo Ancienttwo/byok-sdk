@@ -30,6 +30,14 @@ SDK. Rebuild Node SEA launchers with a supported Node executable.
   `pi_model` configuration and thinking level.
 - Existing pi-durable 1.6.0 SQLite replicas can open in place.
 
+## Cursor Agent CLI (#2514)
+
+On macOS and Linux, add `cursor` to `runtimeAllowlist` to enable the new
+harness. Install `cursor-agent` and run `cursor-agent login` under the device
+user. Set `runtimes.cursor.executable` and `runtimes.cursor.model` if the Host
+needs an executable override or a default model. Phase 1 has fake-CLI
+coverage. See the [Cursor capabilities](../adapter-capabilities.md#cursor-implementation-and-qualification-2514).
+
 ## OAR 0.138.1 (#2521)
 
 - Pass `{ allowPrintMode: true }` to `AgyAdapter.accountUsage()` to continue reading Antigravity quota. For local control IPC, include `allowPrintMode: true` in the `runtimes.usage` request. With the option omitted or false, the call returns `{ kind: 'unsupported', reason: 'print_mode_disabled' }` without starting agy. Opting in runs the `models` authentication check and `/usage` through the SDK-owned reader.

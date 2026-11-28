@@ -1,3 +1,4 @@
+import { CURSOR_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/cursor/cursor-capabilities.ts';
 import { OPENCODE_RUNTIME_CAPABILITIES } from '../../packages/client/src/adapters/opencode/opencode-capabilities.ts';
 import { QUALIFIED_OPENCODE_VERSION } from '../../packages/client/src/adapters/opencode/opencode-version.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -30,6 +31,7 @@ export const COLUMNS = [
   ['Codex', CODEX_RUNTIME_CAPABILITIES, QUALIFIED_CODEX_VERSION, CODEX_ABSENT_ISOLATION_SOURCES],
   ['dsh', DSH_RUNTIME_CAPABILITIES, QUALIFIED_DSH_VERSION, DSH_ABSENT_ISOLATION_SOURCES],
   ['Grok', GROK_RUNTIME_CAPABILITIES, QUALIFIED_GROK_VERSION, GROK_ABSENT_ISOLATION_SOURCES],
+  ['Cursor', CURSOR_RUNTIME_CAPABILITIES, 'unqualified (fake-CLI)', {}],
   ['OpenCode', OPENCODE_RUNTIME_CAPABILITIES, QUALIFIED_OPENCODE_VERSION, {}],
   ['Pi', PI_RUNTIME_CAPABILITIES, piPin, PI_ABSENT_ISOLATION_SOURCES],
   ['Pi (`durableLane`)', PI_DURABLE_RUNTIME_CAPABILITIES, piPin, PI_ABSENT_ISOLATION_SOURCES],
