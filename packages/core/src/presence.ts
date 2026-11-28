@@ -30,6 +30,7 @@ export interface PresenceRuntimeCapabilities {
   readonly resume?: boolean;
   readonly approvalInteractive?: boolean;
   readonly mcpToolsets?: boolean;
+  readonly skills?: boolean;
   readonly messageDraft?: boolean;
   readonly toolAuthorizationAuto?: boolean;
   readonly durableLane?: boolean;
@@ -75,7 +76,7 @@ export function freezePresenceHarnessFact(runtime: PresenceHarnessFact): Presenc
     ...(runtime.version === undefined ? {} : { version: runtime.version }),
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
     capabilities: Object.freeze({
-      ...definedFlags(capabilities, ['steer', 'images', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane']),
+      ...definedFlags(capabilities, ['steer', 'images', 'resume', 'approvalInteractive', 'mcpToolsets', 'skills', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane']),
       selectionModes: Object.freeze([...capabilities.selectionModes]),
       ...(capabilities.defaultModelModes === undefined ? {} : { defaultModelModes: Object.freeze([...capabilities.defaultModelModes]) }),
       effort: capabilities.effort,

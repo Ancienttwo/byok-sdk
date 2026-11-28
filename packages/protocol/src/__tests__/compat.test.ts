@@ -13,6 +13,7 @@ import {
   AGENT_MEMORY_START_REFUSALS,
   CAPABILITY_FLAGS,
   HARNESS_SERVICE_TIER_CAPABILITY,
+  SKILL_SELECTION_CAPABILITY,
   EnvelopeSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   EnvelopeValidationError,
@@ -867,6 +868,38 @@ describe('compat v8: published 0.45.0 baseline', () => {
     const { serviceTier: _serviceTier, serviceTierFallback: _serviceTierFallback, ...target } = offer.payload.target as Record<string, unknown>;
     const offerWithoutTier = { ...JSON.parse(offer.raw), payload: { ...offer.payload, target } };
     expect(parseMessage(v8Release.decodeEnvelope(JSON.stringify(offerWithoutTier)))).toEqual(offerWithoutTier);
+  });
+
+  it('published v8 strips RuntimeCapabilities.skills and refuses requiredSkills offers while skill-less offers still decode', () => {
+    const hello = v8Corpus.find(line => line.type === 'conn.hello'
+      && (line.payload.capabilities as string[]).includes(SKILL_SELECTION_CAPABILITY))!;
+    const oldHello = v8Release.decodeEnvelope(hello.raw);
+    expect(oldHello.type).toBe('conn.hello');
+    if (oldHello.type !== 'conn.hello') throw new Error('expected conn.hello');
+    expect(oldHello.payload.capabilities).toContain(SKILL_SELECTION_CAPABILITY);
+    for (const { capabilities } of oldHello.payload.harnesses ?? []) {
+      expect(capabilities).not.toHaveProperty('skills');
+    }
+
+    const presence = v8HttpCorpus.find(line => line.surface === 'PresencePublishRequest'
+      && line.body.includes('"skills":true'))!;
+    const oldPresence = v8Release.PresencePublishRequestSchema.parse(JSON.parse(presence.body));
+    expect(oldPresence.harnesses).toEqual(oldHello.payload.harnesses);
+
+    const claim = v8Corpus.find(line => line.type === 'task.claim'
+      && (line.payload.capabilities as Record<string, unknown> | undefined)?.skills === true)!;
+    const oldClaim = v8Release.decodeEnvelope(claim.raw);
+    expect(oldClaim.type).toBe('task.claim');
+    if (oldClaim.type !== 'task.claim') throw new Error('expected task.claim');
+    expect(oldClaim.payload.capabilities).not.toHaveProperty('skills');
+
+    const offer = v8Corpus.find(line => line.type === 'task.offer'
+      && line.payload.sealing === undefined
+      && requiredReceiverCapabilities(line.type, line.payload).includes(SKILL_SELECTION_CAPABILITY))!;
+    expect(() => v8Release.decodeEnvelope(offer.raw)).toThrow(v8Release.EnvelopeValidationError);
+    const { requiredSkills: _requiredSkills, ...withoutSkills } = offer.payload;
+    const offerWithoutSkills = { ...JSON.parse(offer.raw), payload: withoutSkills };
+    expect(parseMessage(v8Release.decodeEnvelope(JSON.stringify(offerWithoutSkills)))).toEqual(offerWithoutSkills);
   });
 
   it('the published decoder reads the exported HTTP corpus and decodes each eligible entry', () => {

@@ -11,7 +11,7 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
 import { createHarness, TENANT_A } from './support/harness';
 
 const MATRIX = {
-  steer: false, images: true, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true,
+  steer: false, images: true, resume: true, approvalInteractive: false, mcpToolsets: true, skills: true, messageDraft: true,
   selectionModes: ['device-default', 'adapter-model'], defaultModelModes: ['adapter-model'], effort: false,
   serviceTier: true, serviceTierFallback: true,
   toolAuthorizationAuto: true, durableLane: false, preparedLane: false,

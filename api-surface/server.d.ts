@@ -1143,7 +1143,7 @@ export declare class SteerRejectedError extends Error {
 }
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { CapabilityFlag, HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, InputImageBlobRef, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, InputImageBlobRef, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, SkillId, TerminalProjectionSelection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { WakeConsumer } from './wakes/types.js';
 import type { RateLimiterOptions } from './rate-limiter.js';
@@ -1196,6 +1196,7 @@ interface DispatchInputBase {
     images?: InputImageBlobRef[];
     deviceId: string;
     requiredToolsets?: ToolsetId[];
+    requiredSkills?: SkillId[];
     egressPolicy?: AgentEgressPolicy;
     messageEgress?: AgentMessageEgressRequirement;
     terminalProjection?: TerminalProjectionSelection;

@@ -701,6 +701,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         }>>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        requiredSkills: z.ZodOptional<z.ZodArray<z.ZodString>>;
         target: z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"auto">;
         }, z.core.$strict>, z.ZodObject<{
@@ -839,6 +840,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         }>>;
         homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        requiredSkills: z.ZodOptional<z.ZodArray<z.ZodString>>;
         target: z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"auto">;
         }, z.core.$strict>, z.ZodObject<{

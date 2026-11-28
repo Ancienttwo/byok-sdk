@@ -29,7 +29,9 @@ export const AGENT_HOME_READERS_CAPABILITY = 'agent-home-readers' as const;
  *
  * `toolset-selection` (additive-minor) means the daemon understands an
  * offer's `requiredToolsets` and can resolve its logical ids against local
- * MCP configuration.
+ * MCP configuration. `skill-selection` (additive-minor) means the daemon
+ * understands an offer's `requiredSkills` and can resolve and project its
+ * logical ids from the local skill registry.
  */
 export const CAPABILITY_FLAGS = [
   'toolset-selection',
@@ -57,6 +59,7 @@ export const CAPABILITY_FLAGS = [
   SEALED_PAYLOAD_V2_CAPABILITY,
   INPUT_IMAGES_CAPABILITY,
   HARNESS_SERVICE_TIER_CAPABILITY,
+  SKILL_SELECTION_CAPABILITY,
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
@@ -81,6 +84,7 @@ import {
   HARNESS_SERVICE_TIER_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
   INPUT_IMAGES_CAPABILITY,
+  SKILL_SELECTION_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
   SEALED_PAYLOAD_V2_CAPABILITY,
 } from './capability-constants.js';

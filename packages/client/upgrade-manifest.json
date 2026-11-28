@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "d896f28d3609baaacfcdac4bf9f7ee1729b4a9e166e4f9dcf2012c21d20bc4ae"
+    "snapshotSha256": "9b58a89a7a8bc1723454da822dbed191d82fe1aa6fd4d9791960bd30dddec0a1"
   },
   "configFields": {
     "status": "tracked",
@@ -145,6 +145,24 @@
         "export:@byok-sdk/client/adapters#CursorAdapter",
         "export:@byok-sdk/client/adapters#CursorAdapterOptions",
         "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+      ]
+    },
+    {
+      "id": "task-scoped-skills-wire",
+      "impact": "additive",
+      "summary": "Wire v8 adds optional requiredSkills (1-16 logical SkillId values) on Agent offers, gated on the device skill-selection capability flag, alongside optional RuntimeCapabilities.skills discovery in conn.hello, presence, and task.claim. Prepared offers and nativeSessions refuse requiredSkills.",
+      "migration": "docs/spec.md#task-scoped-skills",
+      "items": [
+        "export:@byok-sdk/protocol#CONFIGURED_SKILLS_MAX_ITEMS",
+        "export:@byok-sdk/protocol#RequiredSkillsSchema",
+        "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+        "export:@byok-sdk/protocol#SKILL_SELECTION_CAPABILITY",
+        "export:@byok-sdk/protocol#SkillId",
+        "export:@byok-sdk/protocol#SkillIdSchema",
+        "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+        "export:@byok-sdk/protocol#offerSelectionViolation",
+        "export:@byok-sdk/protocol/constants#SKILL_SELECTION_CAPABILITY",
+        "export:@byok-sdk/server#AgentResumeDispatchInput"
       ]
     }
   ],
@@ -327,6 +345,11 @@
       "entry": "harness-service-tier"
     },
     {
+      "item": "export:@byok-sdk/protocol#CONFIGURED_SKILLS_MAX_ITEMS",
+      "change": "added",
+      "entry": "task-scoped-skills-wire"
+    },
+    {
       "item": "export:@byok-sdk/protocol#ConnHelloPayload",
       "change": "changed",
       "entry": "harness-service-tier"
@@ -382,6 +405,36 @@
       "entry": "harness-service-tier"
     },
     {
+      "item": "export:@byok-sdk/protocol#RequiredSkillsSchema",
+      "change": "added",
+      "entry": "task-scoped-skills-wire"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+      "change": "changed",
+      "entry": "task-scoped-skills-wire"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SKILL_SELECTION_CAPABILITY",
+      "change": "added",
+      "entry": "task-scoped-skills-wire"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SkillId",
+      "change": "added",
+      "entry": "task-scoped-skills-wire"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SkillIdSchema",
+      "change": "added",
+      "entry": "task-scoped-skills-wire"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+      "change": "changed",
+      "entry": "task-scoped-skills-wire"
+    },
+    {
       "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
       "change": "changed",
       "entry": "harness-service-tier"
@@ -407,6 +460,11 @@
       "entry": "harness-service-tier"
     },
     {
+      "item": "export:@byok-sdk/protocol#offerSelectionViolation",
+      "change": "changed",
+      "entry": "task-scoped-skills-wire"
+    },
+    {
       "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
       "change": "changed",
       "entry": "harness-service-tier"
@@ -425,6 +483,16 @@
       "item": "export:@byok-sdk/protocol/constants#HARNESS_SERVICE_TIER_TOKEN",
       "change": "added",
       "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#SKILL_SELECTION_CAPABILITY",
+      "change": "added",
+      "entry": "task-scoped-skills-wire"
+    },
+    {
+      "item": "export:@byok-sdk/server#AgentResumeDispatchInput",
+      "change": "changed",
+      "entry": "task-scoped-skills-wire"
     },
     {
       "item": "export:@byok-sdk/server#AuthenticatedTaskAssertion",

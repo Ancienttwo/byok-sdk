@@ -29,6 +29,7 @@ import {
   INPUT_IMAGES_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
   SEALED_PAYLOAD_V2_CAPABILITY,
+  SKILL_SELECTION_CAPABILITY,
 } from './capability-constants.js';
 import type { MessageType } from './messages.js';
 import { SEALED_CATEGORY_CAPABILITY, SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table.js';
@@ -85,6 +86,7 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   offerRow('images', INPUT_IMAGES_CAPABILITY),
   { surface: 'task.steer', field: 'images', capability: INPUT_IMAGES_CAPABILITY },
   offerRow('requiredToolsets', 'toolset-selection'),
+  offerRow('requiredSkills', SKILL_SELECTION_CAPABILITY),
   offerRow('homeAccess', 'agent-home-readers'),
   offerRow('agentMemory', 'agent-memory-selection'),
   offerRow('agentMemory', 'agent-memory-read-if-admitted', 'read-if-admitted'),

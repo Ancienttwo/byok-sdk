@@ -136,3 +136,6 @@ export const HARNESS_SERVICE_TIER_TOKEN = /^[\x21-\x7e]+$/u;
 
 /** Admits image blob references in task offers and steers. */
 export const INPUT_IMAGES_CAPABILITY = 'input-images' as const;
+
+/** Admits task-scoped logical skill selections on Agent offers. */
+export const SKILL_SELECTION_CAPABILITY = 'skill-selection' as const;
