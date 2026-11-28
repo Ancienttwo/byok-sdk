@@ -64,6 +64,7 @@ function fakeDaemon(): { daemon: Daemon; emit: (event: DaemonEvent) => void } {
     status: vi.fn().mockReturnValue({ paired: true, lifecycle: { phase: 'running', connection: 'open' }, activeTaskCount: 0 }),
     reloadMcpToolsets: vi.fn(),
     reportMcpToolsetObservation: vi.fn(),
+    reloadSkills: vi.fn(),
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

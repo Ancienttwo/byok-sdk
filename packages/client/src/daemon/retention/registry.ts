@@ -69,7 +69,7 @@ export const PROTECTED_CLASS_BOUNDS: Readonly<Record<ProtectedClassId, Protected
   'agent-content': { kind: 'exempt', cleanedBy: 'host', reason: 'Host-owned Agent files and memory: their content and lifetime are product data.', api: 'the Host deletes Agent files or the whole Agent home' },
   'byok-authority': { kind: 'exempt', cleanedBy: 'host', reason: 'A fixed set of SDK records per Agent home whose logs keep bounded tails; it grows with Agent count, not task count.', api: 'removed with the Agent home' },
   'agent-home-lease': { kind: 'count', maxEntries: 1, per: 'agent-home' },
-  'skill-pack-current': { kind: 'count', maxEntries: 1, per: 'skill-pack' },
+  'skill-pack-current': { kind: 'count', maxEntries: 2, per: 'skill-pack' },
   'store-authority': { kind: 'exempt', cleanedBy: 'sdk', reason: 'Fixed device records (identity, owner, locks, sockets) and self-bounded logs such as audit.jsonl, which rewrites itself past 10 MiB; none grows with task count.', api: 'removed with the store directory' },
   'runtime-session-external': { kind: 'exempt', cleanedBy: 'host', reason: 'Claude, Codex, Grok and Pi-login session records under the runtime\'s own config directory, mixed with the user\'s sessions; their paths follow each runtime and the SDK never deletes them.', api: "ClaudeAdapterOptions.agentSessionPersistence: 'disabled' for Claude; the runtime's own session management otherwise" },
 });

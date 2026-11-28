@@ -1,5 +1,5 @@
 import type { ControlMethods } from '../control-server.js';
-import { ControlError, parseEnrollmentPairParams, ENROLLMENT_PAIRING_CODE_MAX_BYTES, parseToolsetsReloadParams, parseApprovalsResolveParams, parseApprovalsRequestParams, parseTeamWorkspaceCreateParams, parseTeamWorkspaceJoinParams, parseTeamContextParams, parseTeamMessagePostParams, parseTeamMessageReadParams, parseTeamMessageAckParams, parseTeamNotificationSnapshotParams, parseTeamMessageInspectParams, parseAgentMessagePublishParams, parseMcpContextTokenParams, parseAgentResultSubmitParams, parseAgentMemoryRecallParams, parseAgentMemorySaveParams, type AssertionIssueResult, parseAssertionIssueParams, type TaskAssertionIssueResult, parseTaskAssertionIssueParams, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, parseShutdownParams } from '../control-protocol.js';
+import { ControlError, parseEnrollmentPairParams, ENROLLMENT_PAIRING_CODE_MAX_BYTES, parseToolsetsReloadParams, parseSkillsReloadParams, parseApprovalsResolveParams, parseApprovalsRequestParams, parseTeamWorkspaceCreateParams, parseTeamWorkspaceJoinParams, parseTeamContextParams, parseTeamMessagePostParams, parseTeamMessageReadParams, parseTeamMessageAckParams, parseTeamNotificationSnapshotParams, parseTeamMessageInspectParams, parseAgentMessagePublishParams, parseMcpContextTokenParams, parseAgentResultSubmitParams, parseAgentMemoryRecallParams, parseAgentMemorySaveParams, type AssertionIssueResult, parseAssertionIssueParams, type TaskAssertionIssueResult, parseTaskAssertionIssueParams, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, parseShutdownParams } from '../control-protocol.js';
 import { checkVerificationSecret } from '../device-member.js';
 import { type DeviceRecord, DeviceRecordRePairRequiredError } from '../store.js';
 import { PairedWithoutMemberError } from './support.js';
@@ -7,6 +7,7 @@ import { AuthRequestAbortedError } from '../auth-manager.js';
 import { cancelAuthOperations, runAuthOperation } from './lifecycle.js';
 import { INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationRequestParams, INPUT_PREPARATION_LOOKUP_METHOD, parseInputPreparationLookupParams, INPUT_PREPARATION_CANCEL_METHOD, parseInputPreparationCancelParams } from '../control-protocol.js';
 import { McpToolsetRevisionConflictError } from '../toolset-registry.js';
+import { SkillRegistryError, SkillRevisionConflictError } from '../skill-registry.js';
 import { ApprovalNotFoundError, ApprovalRequiresHostError } from '../approvals.js';
 import { encodeTeamMemberContext, decodeTeamMemberContext } from '../team-workspace.js';
 import { DEVICE_ASSERTION_AUDIENCE_MAX_BYTES } from '@byok-sdk/core';
@@ -117,7 +118,7 @@ async function describeRuntimeEnvironments(adapters: readonly RuntimeAdapter[]):
 function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unary'] {
   const {
     buildControlStatus, config, memberRecords, daemonState, startUnderLease,
-    pairUnderLease, runInputPreparation, toolsetRegistry, approvalRegistry, teamWorkspaces,
+    pairUnderLease, runInputPreparation, toolsetRegistry, skillRegistry, approvalRegistry, teamWorkspaces,
   } = daemonScope;
   return {
     status: () => buildControlStatus(),
@@ -238,6 +239,26 @@ function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unar
       } catch (err) {
         if (err instanceof McpToolsetRevisionConflictError) {
           throw new ControlError('revision_conflict', err.message);
+        }
+        throw new ControlError('bad_request', err instanceof Error ? err.message : String(err));
+      }
+    },
+    'skills.reload': (params) => {
+      const parsed = parseSkillsReloadParams(params);
+      if (!parsed) {
+        throw new ControlError(
+          'bad_request',
+          'skills.reload requires exactly {expectedRevision, skills}',
+        );
+      }
+      try {
+        return skillRegistry.reload(parsed.skills, parsed.expectedRevision);
+      } catch (err) {
+        if (err instanceof SkillRevisionConflictError) {
+          throw new ControlError('revision_conflict', err.message);
+        }
+        if (err instanceof SkillRegistryError) {
+          throw new ControlError(err.code, err.message);
         }
         throw new ControlError('bad_request', err instanceof Error ? err.message : String(err));
       }

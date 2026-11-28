@@ -1,5 +1,11 @@
 import type { DaemonEventListener, Unsubscribe, DaemonTaskInfo } from '../observer.js';
-import type { McpToolsetConfig, McpToolsetReloadReceipt, McpToolsetObservation } from '../../types.js';
+import type {
+  McpToolsetConfig,
+  McpToolsetReloadReceipt,
+  McpToolsetObservation,
+  SkillReloadReceipt,
+  SkillSource,
+} from '../../types.js';
 import type { DaemonScope } from './scope.js';
 
 /** The daemon's local operations: approvals, observation and MCP toolset reloads (#926). */
@@ -46,4 +52,13 @@ export function reportMcpToolsetObservation(
 ): void {
   const { toolsetRegistry } = daemonScope;
   toolsetRegistry.report(toolsetId, expectedDefinitionRevision, observation);
+}
+
+export function reloadSkills(
+  daemonScope: DaemonScope,
+  skills: Record<string, SkillSource> | undefined,
+  expectedRevision: string,
+): SkillReloadReceipt {
+  const { skillRegistry } = daemonScope;
+  return skillRegistry.reload(skills, expectedRevision);
 }

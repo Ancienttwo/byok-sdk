@@ -132,6 +132,8 @@
 //   DaemonEffectiveConfig -> dist/daemon/config-schema/effective.d.ts
 //   DaemonEffectiveMcpServer -> dist/daemon/config-schema/effective.d.ts
 //   DaemonEffectiveRuntime -> dist/daemon/config-schema/effective.d.ts
+//   DaemonEffectiveSkill -> dist/daemon/config-schema/effective.d.ts
+//   DaemonEffectiveSkills -> dist/daemon/config-schema/effective.d.ts
 //   DaemonEffectiveToolAuthorization -> dist/daemon/config-schema/effective.d.ts
 //   DaemonEvent -> dist/daemon/observer.d.ts
 //   DaemonEventListener -> dist/daemon/observer.d.ts
@@ -337,9 +339,11 @@
 //   PiAdapterOptions -> dist/adapters/pi/pi-adapter.d.ts
 //   PiByokLauncherConfig -> dist/adapters/pi/pi-adapter.d.ts
 //   PiRuntimeAssetForm -> dist/adapters/pi/runtime-assets.d.ts
+//   PinnedSkillFile -> dist/daemon/skill-registry.d.ts
 //   PolicyUnsupportedError -> dist/types.d.ts
 //   PreparedRuntimeOperation -> dist/types.d.ts
 //   ProgressBatcherOptions -> dist/daemon/progress-batcher.d.ts
+//   ProjectedSkill -> dist/types.d.ts
 //   ProjectedSkillPack -> dist/daemon/skill-pack-installer.d.ts
 //   ProtectedClassId -> dist/daemon/retention/registry.d.ts
 //   ProviderProvisioningHandler -> dist/daemon/provider-provisioning.d.ts
@@ -364,6 +368,7 @@
 //   RequestTaskAssertionResult -> dist/daemon/assertion-client.d.ts
 //   ResetDeviceCursorInput -> dist/diagnostics/device-doctor.d.ts
 //   ResolvedSdkReservedHelperBin -> dist/sdk-reserved-helper-host.d.ts
+//   ResolvedSkillSnapshot -> dist/daemon/skill-registry.d.ts
 //   RetentionClassId -> dist/daemon/retention/registry.d.ts
 //   RuntimeAdapter -> dist/types.d.ts
 //   RuntimeAdapterDescriptor -> dist/types.d.ts
@@ -418,6 +423,8 @@
 //   SKILL_PACK_LOCK_FILENAME -> dist/daemon/skill-pack-installer.d.ts
 //   SKILL_PACK_LOCK_SCHEMA -> dist/daemon/skill-pack-installer.d.ts
 //   SKILL_PACK_RESPONSE_MAX_BYTES -> dist/daemon/skill-pack-installer.d.ts
+//   SKILL_PROJECTION_INTEGRITY_REASONS -> dist/daemon/skill-projection.d.ts
+//   SKILL_REGISTRY_ERROR_CODES -> dist/daemon/skill-registry.d.ts
 //   SUGGESTED_RUNTIME_VERSIONS_URL -> dist/runtime/oar-suggested-versions.d.ts
 //   ScratchRootPathError -> dist/daemon/retention/scratch.d.ts
 //   SdkDistributionBin -> dist/sdk-native-assets.d.ts
@@ -457,10 +464,23 @@
 //   ServiceWindowsOptions -> dist/lifecycle/service-types.d.ts
 //   Session -> dist/types.d.ts
 //   SessionEvidence -> dist/types.d.ts
+//   SkillConfigInput -> dist/daemon/skill-registry.d.ts
+//   SkillEntryStatus -> dist/types.d.ts
 //   SkillPackInstallError -> dist/daemon/skill-pack-installer.d.ts
 //   SkillPackInstallErrorCode -> dist/daemon/skill-pack-installer.d.ts
 //   SkillPackInstallResult -> dist/daemon/skill-pack-installer.d.ts
 //   SkillPackLock -> dist/daemon/skill-pack-installer.d.ts
+//   SkillProjectionIntegrityError -> dist/daemon/skill-projection.d.ts
+//   SkillProjectionIntegrityReason -> dist/daemon/skill-projection.d.ts
+//   SkillRegistry -> dist/daemon/skill-registry.d.ts
+//   SkillRegistryError -> dist/daemon/skill-registry.d.ts
+//   SkillRegistryErrorCode -> dist/daemon/skill-registry.d.ts
+//   SkillRegistryOptions -> dist/daemon/skill-registry.d.ts
+//   SkillRegistrySnapshot -> dist/daemon/skill-registry.d.ts
+//   SkillRegistryStatus -> dist/types.d.ts
+//   SkillReloadReceipt -> dist/types.d.ts
+//   SkillRevisionConflictError -> dist/daemon/skill-registry.d.ts
+//   SkillSource -> dist/types.d.ts
 //   SqliteLocalTaskJournal -> dist/daemon/journal/sqlite-journal.d.ts
 //   SqliteLocalTaskJournalOptions -> dist/daemon/journal/sqlite-journal.d.ts
 //   SteerUnsupportedError -> dist/types.d.ts
@@ -2190,6 +2210,8 @@ export interface DaemonConfigCheck {
 }
 export declare function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOptions): DaemonConfigCheck;
 // ==== @byok-sdk/client dist/daemon/config-schema/effective.d.ts ====
+import type { ContentHash } from '@byok-sdk/core';
+import type { SkillId } from '@byok-sdk/protocol';
 import { type ToolAuthorizationMode, type ToolFileScope } from '../../tool-authorization.js';
 import type { RuntimeVersionPolicy } from '../../types.js';
 import type { DaemonStatus } from '../create-daemon.js';
@@ -2208,6 +2230,17 @@ export interface DaemonEffectiveMcpServer {
     readonly kind: 'sdk-reserved' | 'host-toolset';
     readonly mount: 'per-task' | 'off' | 'unavailable';
     readonly detail: string;
+}
+export interface DaemonEffectiveSkill {
+    readonly id: SkillId;
+    readonly sourceKind: 'path' | 'pack';
+    readonly name: string;
+    readonly contentHash: ContentHash;
+    readonly packVersion?: string;
+}
+export interface DaemonEffectiveSkills {
+    readonly revision: string;
+    readonly entries: readonly DaemonEffectiveSkill[];
 }
 export interface DaemonEffectiveRuntime {
     readonly id: string;
@@ -2239,6 +2272,7 @@ export interface DaemonEffectiveConfig {
         readonly helper: DaemonMemoryHelperResolution;
     };
     readonly mcpServers: readonly DaemonEffectiveMcpServer[];
+    readonly skills: DaemonEffectiveSkills;
     readonly runtimes: readonly DaemonEffectiveRuntime[];
     readonly toolAuthorization: DaemonEffectiveToolAuthorization;
 }
@@ -2289,7 +2323,7 @@ import type { DaemonLifecycle } from './daemon-lifecycle.js';
 import type { RuntimeObservation } from '../runtime-detection.js';
 import type { ServiceEnvironmentStatus } from '../login-shell-environment.js';
 import type { LocalAgentReleaseIdentity } from '../release-identity.js';
-import type { McpToolsetRegistryStatus } from '../types.js';
+import type { McpToolsetRegistryStatus, SkillRegistryStatus } from '../types.js';
 import type { AgentHomeExecutionStatus } from '../agent-home.js';
 import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation.js';
 // support
@@ -2329,6 +2363,7 @@ export interface ControlStatusResult {
     operationalHealth: OperationalHealthSnapshot;
     outbound: import('./outbound-settlement.js').OutboundStatus;
     toolsets: McpToolsetRegistryStatus;
+    skills?: SkillRegistryStatus;
     agentHomeExecution?: AgentHomeExecutionStatus;
     clockSkew?: ClockSkewObservation;
 }
@@ -2373,7 +2408,7 @@ import { type DaemonTaskSettlement } from './task-settlement.js';
 import { type RuntimeObservation } from '../runtime-detection.js';
 import { type ServiceEnvironmentStatus } from '../login-shell-environment.js';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types.js';
+import type { RuntimeAdapter, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt, SkillSource, SkillRegistryStatus, SkillReloadReceipt } from '../types.js';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home.js';
 import type { AgentRef } from '../agent-home.js';
 import { type LocalAgentReleaseIdentity } from '../release-identity.js';
@@ -2446,6 +2481,7 @@ export interface DaemonConfig {
     branding?: DaemonBranding;
     codexSandbox?: CodexSandboxSetting;
     mcpToolsets?: Record<string, McpToolsetConfig>;
+    skills?: Record<string, SkillSource>;
     dangerouslyAllowInsecureRemote?: boolean;
     maxTaskOutputBytes?: number;
     artifactLimits?: {
@@ -2515,6 +2551,7 @@ export interface DaemonStatus {
     branding?: DaemonBranding;
     operationalHealth: OperationalHealthSnapshot;
     toolsets: McpToolsetRegistryStatus;
+    skills: SkillRegistryStatus;
     egress: AgentEgressStatus;
     outbound: OutboundStatus;
     agentHomeExecution: AgentHomeExecutionStatus;
@@ -2557,6 +2594,7 @@ export interface Daemon {
     publishReliableAgentEgress?(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult>;
     reloadMcpToolsets(mcpToolsets: Record<string, McpToolsetConfig> | undefined, expectedRevision: string): McpToolsetReloadReceipt;
     reportMcpToolsetObservation(toolsetId: string, expectedDefinitionRevision: string, observation: McpToolsetObservation): void;
+    reloadSkills(skills: Record<string, SkillSource> | undefined, expectedRevision: string): SkillReloadReceipt;
     subscribe(listener: DaemonEventListener): Unsubscribe;
     tasks(): DaemonTaskInfo[];
     unpair(): Promise<void>;
@@ -3784,6 +3822,73 @@ export interface ProjectedSkillPack {
     readonly files: readonly string[];
 }
 export declare function projectSkillPack(dataDir: string, name: string, targetDir: string): Promise<ProjectedSkillPack>;
+// ==== @byok-sdk/client dist/daemon/skill-projection.d.ts ====
+export declare const SKILL_PROJECTION_INTEGRITY_REASONS: readonly ['target_unsafe', 'root_missing', 'root_unsafe', 'symlink_detected', 'hardlink_detected', 'unexpected_entry', 'unexpected_file', 'file_missing', 'file_size_mismatch', 'file_hash_mismatch', 'file_changed_during_read', 'path_unsafe'];
+export type SkillProjectionIntegrityReason = (typeof SKILL_PROJECTION_INTEGRITY_REASONS)[number];
+export declare class SkillProjectionIntegrityError extends Error {
+    readonly reason: SkillProjectionIntegrityReason;
+    readonly skillId: string;
+    readonly filePath: string | undefined;
+    constructor(reason: SkillProjectionIntegrityReason, skillId: string, message: string, options?: {
+        readonly cause?: unknown;
+        readonly filePath?: string;
+    });
+}
+// ==== @byok-sdk/client dist/daemon/skill-registry.d.ts ====
+import { type ContentHash } from '@byok-sdk/core';
+import { type SkillId } from '@byok-sdk/protocol';
+import type { SkillRegistryStatus, SkillReloadReceipt, SkillSource } from '../types.js';
+export declare const SKILL_REGISTRY_ERROR_CODES: readonly ['invalid_config', 'invalid_skill_id', 'invalid_revision', 'path_not_absolute', 'path_not_found', 'path_unsafe', 'symlink_forbidden', 'hardlink_forbidden', 'unsupported_file_type', 'entry_missing', 'frontmatter_invalid', 'file_count_over_cap', 'file_over_cap', 'pack_over_cap', 'pack_not_installed', 'pack_corrupt', 'io_error'];
+export type SkillRegistryErrorCode = (typeof SKILL_REGISTRY_ERROR_CODES)[number];
+export declare class SkillRegistryError extends Error {
+    readonly code: SkillRegistryErrorCode;
+    readonly skillId: string | undefined;
+    constructor(code: SkillRegistryErrorCode, message: string, options?: {
+        readonly cause?: unknown;
+        readonly skillId?: string;
+    });
+}
+export declare class SkillRevisionConflictError extends Error {
+    readonly expectedRevision: string;
+    readonly actualRevision: string;
+    constructor(expectedRevision: string, actualRevision: string);
+}
+export type SkillConfigInput = Record<string, SkillSource> | undefined;
+export interface SkillRegistryOptions {
+    readonly dataDir?: string;
+}
+export interface PinnedSkillFile {
+    readonly path: string;
+    readonly sha256: ContentHash;
+    readonly bytes: number;
+}
+export interface ResolvedSkillSnapshot {
+    readonly id: SkillId;
+    readonly source: SkillSource;
+    readonly sourceKind: 'file' | 'directory' | 'pack';
+    readonly name: string;
+    readonly description: string;
+    readonly rootDir: string;
+    readonly packStoreRoot?: string;
+    readonly packVersion?: string;
+    readonly files: readonly Readonly<PinnedSkillFile>[];
+    readonly contentHash: ContentHash;
+}
+export interface SkillRegistrySnapshot {
+    readonly revision: string;
+    readonly skills: ReadonlyMap<SkillId, ResolvedSkillSnapshot>;
+    readonly configuredSkills: readonly SkillId[];
+}
+export declare class SkillRegistry {
+    private state;
+    private readonly dataDir;
+    constructor(configured?: SkillConfigInput, options?: SkillRegistryOptions);
+    snapshot(): SkillRegistrySnapshot;
+    pinnedPackDirectories(): ReadonlySet<string>;
+    status(): SkillRegistryStatus;
+    reload(skills: SkillConfigInput, expectedRevision: string): SkillReloadReceipt;
+    private statusRows;
+}
 // ==== @byok-sdk/client dist/daemon/store.d.ts ====
 import { type EnsureSecureDirOptions } from '../util/secure-dir.js';
 import { type DeviceCredentialBackend, type DeviceCredentialConfig, type DeviceMetadata } from './device-credential-store.js';
@@ -4355,7 +4460,7 @@ export interface FileScopeGrant {
 export { HostLayoutInputError, resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { StoreCompatibility } from '@byok-sdk/core';
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeInputImage, RuntimeInputOptions, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeInputImage, RuntimeInputOptions, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, SkillSource, SkillEntryStatus, SkillRegistryStatus, SkillReloadReceipt, ProjectedSkill, AgentEgressPolicy, } from './types.js';
 export type { AgentRef } from './agent-home.js';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeForeignLeaseError, AgentHomeLeaseMarkerMismatchError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store.js';
@@ -4378,6 +4483,7 @@ export { upgradeRuntime, uninstallManagedRuntime, type RuntimeUpgradeOptions, ty
 export type { ManagedRuntimeId } from './adapters/managed-runtime-path.js';
 export { SUGGESTED_RUNTIME_VERSIONS_URL, suggestedRuntimeVersions, parseSuggestedRuntimeVersions, checkSuggestedRuntimeVersion, type SuggestedRuntimeVersionEntry, type SuggestedRuntimeVersionsManifest, type SuggestedRuntimeVersionAdvice, type UpgradeableRuntimeId, type RuntimeUpgradeAdvice, } from './runtime/runtime-releases.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
+export type { DaemonEffectiveSkill, DaemonEffectiveSkills, } from './daemon/config-schema/effective.js';
 export { DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, PairingAttemptRefusedError, PairingBusyError, PairingInputInvalidError, PairingCodeRejectedError, PairingSupersededError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';
@@ -4395,6 +4501,10 @@ export type { AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-e
 export { AGENT_CONTENT_READ_CAPABILITIES, } from './daemon/agent-content-read.js';
 export type { AgentContentReadSurface, AgentContentReadDecision, AgentContentReadReason, AgentContentReadRoot, AgentContentReadPolicy, AgentContentReadPolicySelection, AgentContentReadRequest, AgentContentReadResult, AgentContentReadAllowed, AgentContentReadDenied, AgentContentSessionIdentity, AgentContentAuditReceipt, } from './daemon/agent-content-read.js';
 export { McpToolsetRevisionConflictError, McpToolsetDefinitionRevisionConflictError, } from './daemon/toolset-registry.js';
+export { SKILL_REGISTRY_ERROR_CODES, SkillRegistry, SkillRegistryError, SkillRevisionConflictError, } from './daemon/skill-registry.js';
+export type { PinnedSkillFile, ResolvedSkillSnapshot, SkillConfigInput, SkillRegistryErrorCode, SkillRegistryOptions, SkillRegistrySnapshot, } from './daemon/skill-registry.js';
+export { SKILL_PROJECTION_INTEGRITY_REASONS, SkillProjectionIntegrityError, } from './daemon/skill-projection.js';
+export type { SkillProjectionIntegrityReason } from './daemon/skill-projection.js';
 export type { ProgressBatcherOptions } from './daemon/progress-batcher.js';
 export { requestDeviceAssertion, requestTaskAssertion } from './daemon/assertion-client.js';
 export type { RequestDeviceAssertionOptions, RequestDeviceAssertionResult, RequestDeviceAssertionErrorCode, RequestTaskAssertionOptions, RequestTaskAssertionResult, RequestTaskAssertionErrorCode, } from './daemon/assertion-client.js';
@@ -6155,7 +6265,8 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
-import type { AgentEvent, DefaultModelSelectionMode, HarnessSelection, SelectionMode, TaskDeclineCode, TaskOfferPlainPayload } from '@byok-sdk/protocol';
+import type { ContentHash } from '@byok-sdk/core';
+import type { AgentEvent, DefaultModelSelectionMode, HarnessSelection, SelectionMode, SkillId, TaskDeclineCode, TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation.js';
 import type { AgentRef } from './agent-home.js';
 import type { McpToolsetServerObservation } from './mcp/observation.js';
@@ -6289,6 +6400,38 @@ export interface McpToolsetReloadReceipt {
     revision: string;
     changed: boolean;
     toolsets: readonly Readonly<McpToolsetStatus>[];
+}
+export type SkillSource = {
+    readonly path: string;
+} | {
+    readonly pack: string;
+};
+export interface SkillEntryStatus {
+    readonly id: SkillId;
+    readonly source: SkillSource;
+    readonly name: string;
+    readonly description: string;
+    readonly contentHash: ContentHash;
+    readonly packVersion?: string;
+    readonly status: 'verified';
+}
+export interface SkillRegistryStatus {
+    readonly revision: string;
+    readonly configuredSkills: readonly SkillId[];
+    readonly skills: readonly Readonly<SkillEntryStatus>[];
+}
+export interface SkillReloadReceipt {
+    readonly previousRevision: string;
+    readonly revision: string;
+    readonly changed: boolean;
+    readonly configuredSkills: readonly SkillId[];
+    readonly skills: readonly Readonly<SkillEntryStatus>[];
+}
+export interface ProjectedSkill {
+    readonly id: SkillId;
+    readonly name: string;
+    readonly description: string;
+    readonly dir: string;
 }
 // support
 export interface ApprovalChannel {

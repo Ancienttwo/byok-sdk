@@ -13,7 +13,14 @@ import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detect
 import type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
 import type { RuntimeEnvironmentReport } from '../runtime/environment.js';
 import type { LocalAgentReleaseIdentity } from '../release-identity.js';
-import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
+import type {
+  McpToolsetConfig,
+  McpToolsetRegistryStatus,
+  RuntimeExecutableSource,
+  RuntimeVersionVerdict,
+  SkillRegistryStatus,
+  SkillSource,
+} from '../types.js';
 import type { AgentHomeExecutionStatus } from '../agent-home.js';
 import type {
   InputPreparationAccountingPolicyRefV1,
@@ -434,6 +441,8 @@ export interface ControlStatusResult {
   outbound: import('./outbound-settlement.js').OutboundStatus;
   /** Redacted content-addressed status from the daemon's single local registry. */
   toolsets: McpToolsetRegistryStatus;
+  /** Redacted content-addressed status from the daemon's local skill registry. Absent only for an older control peer. */
+  skills?: SkillRegistryStatus;
   /**
    * WP0: per-canonical-Agent-home execution serialization, counts only —
    * see {@link AgentHomeExecutionStatus}. Absent only for an older control
@@ -452,6 +461,11 @@ export interface ControlStatusResult {
 export interface ToolsetsReloadParams {
   expectedRevision: string;
   mcpToolsets: Record<string, McpToolsetConfig>;
+}
+
+export interface SkillsReloadParams {
+  expectedRevision: string;
+  skills: Record<string, SkillSource>;
 }
 
 /** Maximum opaque pairing-code payload accepted over local control IPC. */
@@ -503,6 +517,20 @@ export function parseToolsetsReloadParams(value: unknown): ToolsetsReloadParams 
   return {
     expectedRevision: value.expectedRevision,
     mcpToolsets: value.mcpToolsets as Record<string, McpToolsetConfig>,
+  };
+}
+
+/** Shape-only parser; skill source and content validation remain registry-owned. */
+export function parseSkillsReloadParams(value: unknown): SkillsReloadParams | undefined {
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== 'expectedRevision' && key !== 'skills')) {
+    return undefined;
+  }
+  if (typeof value.expectedRevision !== 'string' || !isRecord(value.skills) || Array.isArray(value.skills)) {
+    return undefined;
+  }
+  return {
+    expectedRevision: value.expectedRevision,
+    skills: value.skills as Record<string, SkillSource>,
   };
 }
 

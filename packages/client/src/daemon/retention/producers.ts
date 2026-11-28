@@ -36,6 +36,8 @@ interface ProducerOptions {
   readonly piSessionDir?: string;
   /** `<home>/.gemini/antigravity-cli` of `DaemonConfig.runtimes.agy`: the SDK owns that home, so it expires what agy keeps there. */
   readonly agySessionStore?: string;
+  /** Canonical `<dataDir>/skill-packs/<name>/<sha256-hex>` revision directories pinned by the live SkillRegistry snapshot. */
+  readonly pinnedSkillPackDirs?: () => ReadonlySet<string>;
   readonly clock: () => Date;
   /** Entries one usage walk visits before it stops and reports truncated classes. */
   readonly usageScanLimit?: number;
@@ -414,6 +416,13 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
       try { gate = await acquirePathMutationGate({ scope: 'skill-pack-store', targetPath: root }); }
       catch (error) { if (error instanceof PathMutationGateBusyError) continue; throw error; }
       await withRelease(async () => {
+        const pinned = options.pinnedSkillPackDirs?.() ?? new Set<string>();
+        const isPinned = async (directory: string): Promise<boolean> => {
+          if (pinned.size === 0) return false;
+          if (pinned.has(directory)) return true;
+          const canonical = await fs.realpath(directory).catch(() => undefined);
+          return canonical !== undefined && pinned.has(canonical);
+        };
         for await (const entry of entries('skill-pack-old', root, budget)) {
           if (!entry.isDirectory()) continue;
           const pack = await readInstalledSkillPack(dataDir, entry.name);
@@ -421,7 +430,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
           const packRoot = path.dirname(pack.directory);
           for await (const entry of entries('skill-pack-old', packRoot, budget)) {
             const directory = path.join(packRoot, entry.name);
-            if (!entry.isDirectory() || !/^[a-f0-9]{64}$/u.test(entry.name) || directory === pack.directory) continue;
+            if (!entry.isDirectory() || !/^[a-f0-9]{64}$/u.test(entry.name) || directory === pack.directory || await isPinned(directory)) continue;
             const stat = await fs.lstat(directory);
             if (budget.now.getTime() - stat.mtimeMs >= config.ttlMs['skill-pack-old']) await remove(packRoot, directory, budget);
           }
@@ -541,7 +550,8 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     const now = clock(), all = [...EXPIRING_CLASS_IDS, ...PROTECTED_CLASS_IDS];
     const result = new Map<RetentionClassId, ClassUsage>(all.map(classId => [classId,
       { classId, protected: PROTECTED_CLASS_IDS.includes(classId as typeof PROTECTED_CLASS_IDS[number]), measured: false, truncated: false, bytes: 0, entries: 0, oldestAgeMs: null }]));
-    const currentSkills = new Set<string>();
+    const pinnedSkills = options.pinnedSkillPackDirs?.() ?? new Set<string>();
+    const currentSkills = new Set<string>(pinnedSkills);
     // Host-owned roots can hold any number of entries, so one walk stops at a bound
     // and reports lower bounds instead of failing measurement and latching emergency.
     const limit = options.usageScanLimit ?? 65_536;
@@ -586,7 +596,9 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
         const root = skillPacksRoot(dataDir);
         if (inside(root, file)) {
           const parts = path.relative(root, file).split(path.sep), revision = path.join(root, ...parts.slice(0, 2));
-          return parts.length > 2 && /^[a-f0-9]{64}$/u.test(parts[1]!) && !currentSkills.has(revision) && [...currentSkills].some(current => path.dirname(current) === path.dirname(revision)) ? 'skill-pack-old' : 'skill-pack-current';
+          const isCurrent = currentSkills.has(revision)
+            || (pinnedSkills.size > 0 && pinnedSkills.has(await fs.realpath(revision).catch(() => revision)));
+          return parts.length > 2 && /^[a-f0-9]{64}$/u.test(parts[1]!) && !isCurrent && [...currentSkills].some(current => path.dirname(current) === path.dirname(revision)) ? 'skill-pack-old' : 'skill-pack-current';
         }
       }
       if (homes !== undefined && inside(homes, file)) {

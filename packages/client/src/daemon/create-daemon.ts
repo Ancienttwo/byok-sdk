@@ -15,6 +15,9 @@ import type {
   McpToolsetObservation,
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
+  SkillSource,
+  SkillRegistryStatus,
+  SkillReloadReceipt,
 } from '../types.js';
 import {
   type AgentHomeExecutionStatus,
@@ -354,6 +357,14 @@ export interface DaemonConfig {
    */
   mcpToolsets?: Record<string, McpToolsetConfig>;
   /**
+   * Device-local skill registry behind wire-level `requiredSkills` ids. Only
+   * logical ids cross the SaaS wire; local paths, installed pack names, and
+   * skill file bytes stay on the device. Each entry is `{ path }` (an absolute
+   * `SKILL.md` file or skill directory) or `{ pack }` (an installed skill pack
+   * name pinned to its locked content hash).
+   */
+  skills?: Record<string, SkillSource>;
+  /**
    * M5: explicit escape hatch for `url.ts`'s `assertServerUrlAllowed` — see
    * that function's own doc comment for the full allow/deny rule. Default
    * (unset/`false`): a `serverUrl` using plaintext `http:` is only
@@ -664,6 +675,8 @@ export interface DaemonStatus {
   operationalHealth: OperationalHealthSnapshot;
   /** Redacted, content-addressed device-local MCP registry status. */
   toolsets: McpToolsetRegistryStatus;
+  /** Redacted, content-addressed device-local skill registry status. */
+  skills: SkillRegistryStatus;
   /** Content-free egress lane watermarks and typed last-drop facts. */
   egress: AgentEgressStatus;
   outbound: OutboundStatus;
@@ -794,6 +807,11 @@ export interface Daemon {
     expectedDefinitionRevision: string,
     observation: McpToolsetObservation,
   ): void;
+  /** Atomically replace the local skill registry when its current revision matches. */
+  reloadSkills(
+    skills: Record<string, SkillSource> | undefined,
+    expectedRevision: string,
+  ): SkillReloadReceipt;
   /**
    * M3-2a: local observability — subscribe to live `DaemonEvent`s (task
    * feed, connection/pairing state changes, runtime-detection results) as
@@ -946,13 +964,13 @@ function buildDaemon(
   if (authorizationIssues.length > 0) throw new DaemonConfigInvalidError(authorizationIssues);
   const {
     agentHomeReaderLimit, egressPolicy, egressBatcherOptions, presenceCadence, deviceAssertionAudiences,
-    deviceAssertionTtlMs, storeDir, storageConfig, retentionClock, scratchRoot, storagePressure,
+    deviceAssertionTtlMs, storeDir, skillRegistry, storageConfig, retentionClock, scratchRoot, storagePressure,
     inputPreparationLimits, preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf,
   } = composeDaemonStores({ config, overrides, agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, toolsetRegistry, agentMemoryDescribeBin, adapters });
   // Config-derived, so resolved once; `byok-agent config check` builds the same report.
   const effectiveConfig = describeEffectiveDaemonConfig({
     config, memoryHelper, agentMemoryMcpAdmission, storeDir,
-    scratchRoot: storageConfig.scratchRoot, adapters, runtimeSource,
+    scratchRoot: storageConfig.scratchRoot, adapters, runtimeSource, skills: skillRegistry.status(),
   });
 
   const memberStatus = (): DeviceMemberStatus => daemonState.deviceMember ?? (daemonState.memberResuming ? 'resuming' : 'none');
@@ -970,6 +988,7 @@ function buildDaemon(
   const retentionRegistry = createRetentionRegistry({
     storeDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,
     journal: () => daemonState.journal, identity: () => daemonState.retentionIdentity, preparation: () => daemonState.inputPreparationService,
+    pinnedSkillPackDirs: () => skillRegistry.pinnedPackDirectories(),
     ...(agentHomeManager === undefined ? {} : { home: agentHomeManager }),
     ...(agentSessionHandoffs === undefined ? {} : { handoffs: agentSessionHandoffs }),
     ...(piByokLauncher === undefined ? {} : { piSessionDir: piByokLauncher.sessionDir }),
@@ -1106,7 +1125,7 @@ function buildDaemon(
     resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin, agentMemoryDescribeBin,
     agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, memoryHelper, toolAuthorizationResolver, effectiveConfig,
     agentHomeReaderLimit, egressPolicy,
-    egressBatcherOptions, presenceCadence, deviceAssertionAudiences, deviceAssertionTtlMs, storeDir,
+    egressBatcherOptions, presenceCadence, deviceAssertionAudiences, deviceAssertionTtlMs, storeDir, skillRegistry,
     storageConfig, retentionClock, scratchRoot, storagePressure, inputPreparationLimits,
     preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf, memberStatus,
     logMember, operationalHealth, ownedProcessLedger, cursorStore,
@@ -1125,7 +1144,7 @@ function buildDaemon(
 
   const {
     pair, pairEmbedded, start, whenOpen, whenCapabilitiesSettled, stop, status, publishReliableAgentEgress, reloadMcpToolsets,
-    reportMcpToolsetObservation, subscribe, tasks, unpair, approve, reject,
+    reportMcpToolsetObservation, reloadSkills, subscribe, tasks, unpair, approve, reject,
   } = daemonScope;
   return {
     pair,
@@ -1145,6 +1164,7 @@ function buildDaemon(
     }),
     reloadMcpToolsets,
     reportMcpToolsetObservation,
+    reloadSkills,
     subscribe,
     tasks,
     unpair,

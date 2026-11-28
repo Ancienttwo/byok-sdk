@@ -27,7 +27,7 @@ export function buildStorageStatus(daemonScope: DaemonScope): ControlStorageStat
 export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResult {
   const {
     buildStorageStatus, observer, approvalRegistry, localAgentRelease, daemonState,
-    operationalHealth, outboundStatus, toolsetRegistry, agentHomeExecutionStatus,
+    operationalHealth, outboundStatus, toolsetRegistry, skillRegistry, agentHomeExecutionStatus,
   } = daemonScope;
   const storageStatus = buildStorageStatus();
   const activeTasks: ControlActiveTask[] = observer
@@ -70,6 +70,7 @@ export function buildControlStatus(daemonScope: DaemonScope): ControlStatusResul
     operationalHealth: operationalHealth.snapshot(),
     outbound: outboundStatus(),
     toolsets: toolsetRegistry.status(),
+    skills: skillRegistry.status(),
     // WP0: same counts `Daemon.status()` reports, from the same reader.
     agentHomeExecution: agentHomeExecutionStatus(),
     ...(clockSkew === undefined ? {} : { clockSkew }),
@@ -102,7 +103,7 @@ export function outboundStatus(daemonScope: DaemonScope): OutboundStatus {
 export function status(daemonScope: DaemonScope): DaemonStatus {
   const {
     daemonState, buildStorageStatus, localAgentRelease, terminalCommits, config, operationalHealth,
-    outboundStatus, toolsetRegistry, agentHomeExecutionStatus, agentMemoryMcpAdmission, effectiveConfig,
+    outboundStatus, toolsetRegistry, skillRegistry, agentHomeExecutionStatus, agentMemoryMcpAdmission, effectiveConfig,
   } = daemonScope;
   return {
     environment: { ...daemonState.resolvedEnvironment },
@@ -119,6 +120,7 @@ export function status(daemonScope: DaemonScope): DaemonStatus {
     operationalHealth: operationalHealth.snapshot(),
     outbound: outboundStatus(),
     toolsets: toolsetRegistry.status(),
+    skills: skillRegistry.status(),
     egress: daemonState.agentEgress.status(),
     agentHomeExecution: agentHomeExecutionStatus(),
     agentMemoryMcp: agentMemoryMcpAdmission,

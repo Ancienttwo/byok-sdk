@@ -2282,6 +2282,38 @@
       },
       "description": "Device-local registry behind wire-level `requiredToolsets` ids. Only\nlogical ids cross the SaaS wire; MCP executable definitions stay here.\nToolsets define local stdio servers and default to direct exposure.\nSearch exposure requires a qualified runtime and an ordinary offer."
     },
+    "skills": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pack": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "pack"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "description": "Device-local skill registry behind wire-level `requiredSkills` ids. Only\nlogical ids cross the SaaS wire; local paths, installed pack names, and\nskill file bytes stay on the device. Each entry is `{ path }` (an absolute\n`SKILL.md` file or skill directory) or `{ pack }` (an installed skill pack\nname pinned to its locked content hash)."
+    },
     "dangerouslyAllowInsecureRemote": {
       "type": "boolean",
       "description": "M5: explicit escape hatch for `url.ts`'s `assertServerUrlAllowed` — see\nthat function's own doc comment for the full allow/deny rule. Default\n(unset/`false`): a `serverUrl` using plaintext `http:` is only\naccepted when its host is loopback (`localhost`/`*.localhost`,\n`127.0.0.0/8`, `::1`); anything else over plaintext throws a typed\n`InsecureServerUrlError` from `pair()`/`start()` below, BEFORE any\nnetwork call is attempted, rather than silently sending the pairing\ncode / device credentials to a remote host in the clear. Set this\n`true` only when you have deliberately decided to accept that risk\n(e.g. a trusted private network with no TLS terminator in front of the\nserver) — doing so also logs a loud `console.warn` (see\n`checkServerUrl`, this file) every time it actually changes the\noutcome. Never overrides an unsupported scheme (anything other than\n`http:`/`https:`), which is refused unconditionally."

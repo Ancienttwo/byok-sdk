@@ -5,7 +5,7 @@ import { runLifecycleMutation, replaceControlServer, notifyCapabilitySettlement,
 import { runStartUnderLease } from './start.js';
 import { taskContextCapabilityAvailable, applyCapabilityDeclaration, setHelloCapability, startPresenceProducer, waitForHostTaskContext, runPresenceDiscovery } from './presence.js';
 import { runShutdownSequence, performControlShutdown } from './shutdown.js';
-import { approve, reject, subscribe, tasks, reloadMcpToolsets, reportMcpToolsetObservation } from './operations.js';
+import { approve, reject, subscribe, tasks, reloadMcpToolsets, reportMcpToolsetObservation, reloadSkills } from './operations.js';
 import { buildStorageStatus, buildControlStatus, agentHomeExecutionStatus, outboundStatus, status } from './status.js';
 import { dispatchReliableRecord, publishReliableAgentEgress } from './egress.js';
 import type { DaemonScope } from './scope.js';
@@ -18,7 +18,7 @@ const daemonFunctions = {
   runStartUnderLease, taskContextCapabilityAvailable, applyCapabilityDeclaration, setHelloCapability,
   startPresenceProducer, waitForHostTaskContext, runPresenceDiscovery, runShutdownSequence,
   performControlShutdown, approve, reject, subscribe, tasks, reloadMcpToolsets,
-  reportMcpToolsetObservation, buildStorageStatus, buildControlStatus, agentHomeExecutionStatus,
+  reportMcpToolsetObservation, reloadSkills, buildStorageStatus, buildControlStatus, agentHomeExecutionStatus,
   outboundStatus, status, dispatchReliableRecord, publishReliableAgentEgress,
 };
 
@@ -77,6 +77,7 @@ export function bindDaemonFunctions(scope: () => DaemonScope): DaemonFunctions {
     tasks: (...args) => tasks(scope(), ...args),
     reloadMcpToolsets: (...args) => reloadMcpToolsets(scope(), ...args),
     reportMcpToolsetObservation: (...args) => reportMcpToolsetObservation(scope(), ...args),
+    reloadSkills: (...args) => reloadSkills(scope(), ...args),
     buildStorageStatus: (...args) => buildStorageStatus(scope(), ...args),
     buildControlStatus: (...args) => buildControlStatus(scope(), ...args),
     agentHomeExecutionStatus: (...args) => agentHomeExecutionStatus(scope(), ...args),

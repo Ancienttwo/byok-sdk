@@ -3,6 +3,7 @@ import { resolveAgentEgressPolicy } from '../agent-egress-policy.js';
 import type { ProgressBatcherOptions } from '../progress-batcher.js';
 import { resolveDaemonOperationalConfig } from './operational-config.js';
 import { DeviceStore, type DeviceRecord } from '../store.js';
+import { SkillRegistry } from '../skill-registry.js';
 import { resolveStorageConfig } from '../retention/config.js';
 import { ScratchRoot } from '../retention/scratch.js';
 import { StoragePressure } from '../retention/pressure.js';
@@ -43,6 +44,7 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
     resolveDaemonOperationalConfig(config);
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
+  const skillRegistry = new SkillRegistry(config.skills, { dataDir: storeDir });
   const storageConfig = resolveStorageConfig(storeDir, config.storage);
   assertAgySessionStoreTtl(storageConfig.ttlMs, input.adapters);
   const retentionClock = overrides.retention?.clock ?? (() => new Date());
@@ -88,7 +90,7 @@ export function composeDaemonStores(input: Pick<DaemonInputs & DaemonConfigScope
   };
   return {
     agentHomeReaderLimit, egressPolicy, egressBatcherOptions, presenceCadence, deviceAssertionAudiences,
-    deviceAssertionTtlMs, storeDir, storageConfig, retentionClock, scratchRoot, storagePressure,
+    deviceAssertionTtlMs, storeDir, skillRegistry, storageConfig, retentionClock, scratchRoot, storagePressure,
     inputPreparationLimits, preparedToolSurface, teamWorkspaces, store, memberRecords, sealIdentityOf,
   };
 }

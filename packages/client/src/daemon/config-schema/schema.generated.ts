@@ -2166,6 +2166,37 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "additionalProperties": false
       }
     },
+    "skills": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "pack": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "pack"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
     "dangerouslyAllowInsecureRemote": {
       "type": "boolean"
     },
