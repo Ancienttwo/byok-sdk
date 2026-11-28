@@ -6,8 +6,8 @@
     "snapshotSha256": "777d9649287a5d436026c0a9668cbe76c2004aa2abf92007ed866c9bd59ea901"
   },
   "to": {
-    "version": "0.47.1",
-    "snapshotSha256": "2ec5688ee950007c27244aa1f9ab718020530e179baabb95f74ccbd799fde247"
+    "version": "0.48.0",
+    "snapshotSha256": "b6e4dbab01ceb141d0c4805046a7e15919335bfce93bf356ca1db5512c965362"
   },
   "configFields": {
     "status": "tracked",
@@ -19,7 +19,7 @@
       "id": "node-24-22-3-floor",
       "impact": "breaking",
       "summary": "The public SDK packages require Node.js 24.22.3 or later via engines.node. Upgrade the Node runtime on Hosts and daemon machines before installing the new SDK.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#nodejs-24223-minimum",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#nodejs-24223-minimum",
       "items": [
         "behavior:node-24-22-3-floor"
       ]
@@ -29,7 +29,7 @@
       "impact": "breaking",
       "acceptance": "accept",
       "summary": "Re-prepare Pi inputs and rebind Host accounting rulings for the 1.7.0 closure. Replace removed model IDs in the pinned keys catalog. Pi-durable 1.6.0 and 1.6.1 SQLite replicas open in place.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#pi-170-closure-2585",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#pi-170-closure-2585",
       "items": [
         "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
         "store:pi-durable"
@@ -39,7 +39,7 @@
       "id": "antigravity-print-mode-opt-in",
       "impact": "breaking",
       "summary": "@byok-sdk/client AgyAdapter.accountUsage requires allowPrintMode: true to read Antigravity quota. Pass it in the options or in the local runtimes.usage request to retain quota reads.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#oar-01381-2521",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#oar-01381-2521",
       "items": [
         "behavior:antigravity-print-mode-opt-in"
       ]
@@ -48,7 +48,7 @@
       "id": "antigravity-account-usage-options",
       "impact": "additive",
       "summary": "AgyAdapter.accountUsage and RuntimeAdapter.accountUsage accept RuntimeAccountUsageOptions. Handle print_mode_disabled when print mode is omitted or disabled. The qualified Antigravity CLI version is 1.5.18.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#oar-01381-2521",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#oar-01381-2521",
       "items": [
         "export:@byok-sdk/client#AgyAdapter",
         "export:@byok-sdk/client#RuntimeAdapter",
@@ -63,7 +63,7 @@
       "id": "suggested-runtime-versions",
       "impact": "additive",
       "summary": "Hosts can compare installed runtimes against OAR's bundled suggested minimums or validate a live manifest fetched on the Host's schedule.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#suggested-runtime-versions-2524",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#suggested-runtime-versions-2524",
       "items": [
         "export:@byok-sdk/client#SUGGESTED_RUNTIME_VERSIONS_URL",
         "export:@byok-sdk/client#SuggestedRuntimeVersionAdvice",
@@ -78,7 +78,7 @@
       "id": "harness-service-tier",
       "impact": "additive",
       "summary": "Wire v8 Hosts can request a service tier and authorize default-tier fallback on Codex and Claude. Check device and harness support, and read the applied tier in task activity.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#host-selected-service-tier-2523",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#host-selected-service-tier-2523",
       "items": [
         "export:@byok-sdk/client#RuntimeAdapterDescriptor",
         "export:@byok-sdk/client#RuntimeOperationManifest",
@@ -120,7 +120,7 @@
       "id": "server-host-mcp-task-context",
       "impact": "additive",
       "summary": "@byok-sdk/server adds the off-by-default CreateByokServerOptions.hostMcpTaskContext switch and verifyHostMcpTaskAssertion (with HostMcpTaskAssertionError) to declare host-mcp-task-context via @byok-sdk/cloud capabilityDeclarationForPorts and verify spec §8.2(2) and §8.2(3) in one fail-closed entry.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2559",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#host-mcp-task-context-2559",
       "items": [
         "export:@byok-sdk/cloud#capabilityDeclarationForPorts",
         "export:@byok-sdk/server#AuthenticatedTaskAssertion",
@@ -137,7 +137,7 @@
       "id": "cursor-agent-cli",
       "impact": "additive",
       "summary": "CursorAdapter adds an opt-in Cursor Agent CLI harness on macOS and Linux. It uses the device user's CLI login. Phase 1 has fake-CLI coverage.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#cursor-agent-cli-2514",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#cursor-agent-cli-2514",
       "items": [
         "config:runtimes",
         "export:@byok-sdk/client#CursorAdapter",
@@ -151,7 +151,7 @@
       "id": "task-scoped-skills-wire",
       "impact": "additive",
       "summary": "Wire v8 adds optional requiredSkills (1-16 logical SkillId values) on Agent offers, gated on the device skill-selection capability flag, alongside optional RuntimeCapabilities.skills discovery in conn.hello, presence, and task.claim. Prepared offers and nativeSessions refuse requiredSkills.",
-      "migration": "docs/spec.md#task-scoped-skills",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#task-scoped-skills-wire-2575",
       "items": [
         "export:@byok-sdk/protocol#CONFIGURED_SKILLS_MAX_ITEMS",
         "export:@byok-sdk/protocol#RequiredSkillsSchema",
@@ -169,7 +169,7 @@
       "id": "bot-profile-skills",
       "impact": "additive",
       "summary": "@byok-sdk/bot-collaboration TeamSnapshotBot and BotProfile gain optional Host-owned skills (SkillId[]), merged template-first into Turn execution requiredSkills (max 16) and stripped from dream executions.",
-      "migration": "docs/spec.md#k8-bot-skills",
+      "migration": "docs/releases/host-upgrade-0.48.0.md#bot-profile-skills-2578",
       "items": [
         "export:@byok-sdk/bot-collaboration#TeamSnapshotBot",
         "export:@byok-sdk/bot-collaboration/host-kit#BotProfile"
