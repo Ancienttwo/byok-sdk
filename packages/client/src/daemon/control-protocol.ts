@@ -322,7 +322,7 @@ export class NdjsonLineReader {
     this.maxLineBytes = maxLineBytes;
   }
 
-  /** Adjusts the active single-line byte cap for subsequent reads. */
+  /** Adjusts the active unterminated-line byte cap for subsequent reads. */
   setMaxLineBytes(maxLineBytes: number): void {
     if (!Number.isSafeInteger(maxLineBytes) || maxLineBytes <= 0) {
       throw new RangeError('NdjsonLineReader maxLineBytes must be a positive safe integer');
@@ -330,33 +330,18 @@ export class NdjsonLineReader {
     this.maxLineBytes = maxLineBytes;
   }
 
-  /** @throws if a complete line or the still-unterminated remainder exceeds the active line-byte cap. */
+  /** @throws if the still-unterminated remainder exceeds the active line-byte cap — see {@link MAX_LINE_BYTES}. */
   push(chunk: Buffer): string[] {
-    const firstNewline = chunk.indexOf(0x0a);
-    if (firstNewline === -1) {
-      if (this.pending.length + chunk.length > this.maxLineBytes) {
-        this.pending = Buffer.alloc(0);
-        throw new Error(`NDJSON line exceeded ${this.maxLineBytes} bytes without a terminating newline`);
-      }
-    } else if (this.pending.length + firstNewline > this.maxLineBytes) {
-      this.pending = Buffer.alloc(0);
-      throw new Error(`NDJSON line exceeded ${this.maxLineBytes} bytes`);
-    }
     this.pending = this.pending.length > 0 ? Buffer.concat([this.pending, chunk]) : chunk;
     const lines: string[] = [];
     let newlineIndex: number;
     // eslint-disable-next-line no-cond-assign
     while ((newlineIndex = this.pending.indexOf(0x0a)) !== -1) {
-      if (newlineIndex > this.maxLineBytes) {
-        this.pending = Buffer.alloc(0);
-        throw new Error(`NDJSON line exceeded ${this.maxLineBytes} bytes`);
-      }
       const line = this.pending.subarray(0, newlineIndex).toString('utf8');
       this.pending = this.pending.subarray(newlineIndex + 1);
       if (line.length > 0) lines.push(line);
     }
     if (this.pending.length > this.maxLineBytes) {
-      this.pending = Buffer.alloc(0);
       throw new Error(`NDJSON line exceeded ${this.maxLineBytes} bytes without a terminating newline`);
     }
     return lines;

@@ -891,12 +891,9 @@ describe('DaemonConfig.skills schema, Daemon.status().skills, reloadSkills, and 
     }
   });
 
-  it('enforces NdjsonLineReader terminated and unterminated bounds before and after setMaxLineBytes', () => {
+  it('enforces NdjsonLineReader unterminated-line bounds before and after setMaxLineBytes', () => {
     const preAuth = new NdjsonLineReader();
     expect(preAuth.push(Buffer.from(`${'a'.repeat(MAX_LINE_BYTES)}\n`))).toHaveLength(1);
-    expect(() => preAuth.push(Buffer.from(`${'a'.repeat(MAX_LINE_BYTES + 1)}\n`))).toThrow(
-      `NDJSON line exceeded ${MAX_LINE_BYTES} bytes`,
-    );
     expect(() => preAuth.push(Buffer.from('a'.repeat(MAX_LINE_BYTES + 1)))).toThrow(
       `NDJSON line exceeded ${MAX_LINE_BYTES} bytes without a terminating newline`,
     );
@@ -905,9 +902,6 @@ describe('DaemonConfig.skills schema, Daemon.status().skills, reloadSkills, and 
     postAuth.setMaxLineBytes(MAX_AUTHENTICATED_REQUEST_LINE_BYTES);
     const largeLine = 'b'.repeat(200 * 1024);
     expect(postAuth.push(Buffer.from(`${largeLine}\n`))).toEqual([largeLine]);
-    expect(() => postAuth.push(Buffer.from(`${'c'.repeat(MAX_AUTHENTICATED_REQUEST_LINE_BYTES + 1)}\n`))).toThrow(
-      `NDJSON line exceeded ${MAX_AUTHENTICATED_REQUEST_LINE_BYTES} bytes`,
-    );
     expect(() => postAuth.push(Buffer.from('c'.repeat(MAX_AUTHENTICATED_REQUEST_LINE_BYTES + 1)))).toThrow(
       `NDJSON line exceeded ${MAX_AUTHENTICATED_REQUEST_LINE_BYTES} bytes without a terminating newline`,
     );
@@ -996,16 +990,16 @@ describe('DaemonConfig.skills schema, Daemon.status().skills, reloadSkills, and 
         });
       });
 
-    // Pre-auth terminated frame > 64 KiB is refused fail-closed.
+    // Pre-auth unterminated frame > 64 KiB is refused fail-closed.
     const preAuthSocket = net.createConnection(endpoint);
     preAuthSocket.on('error', () => {});
     const preAuthClosed = waitClosed(preAuthSocket);
     preAuthSocket.once('connect', () => {
-      preAuthSocket.write(`${JSON.stringify({ v: 1, hello: 'client', nonce: 'a'.repeat(MAX_LINE_BYTES + 128) })}\n`);
+      preAuthSocket.write(`{"v":1,"hello":"client","nonce":"${'a'.repeat(MAX_LINE_BYTES + 128)}`);
     });
     await preAuthClosed;
 
-    // Post-auth terminated frame > 1 MiB is refused fail-closed.
+    // Post-auth unterminated frame > 1 MiB is refused fail-closed.
     const postAuthSocket = net.createConnection(endpoint);
     postAuthSocket.on('error', () => {});
     const postAuthClosed = waitClosed(postAuthSocket);
@@ -1025,7 +1019,7 @@ describe('DaemonConfig.skills schema, Daemon.status().skills, reloadSkills, and 
           phase = 'ready';
         } else if (phase === 'ready' && parseServerReady(parsed)) {
           phase = 'done';
-          postAuthSocket.write(`${JSON.stringify({ v: 1, id: 'oversize', method: 'skills.reload', params: { pad: 'z'.repeat(MAX_AUTHENTICATED_REQUEST_LINE_BYTES + 128) } })}\n`);
+          postAuthSocket.write(`{"v":1,"id":"oversize","method":"skills.reload","params":{"pad":"${'z'.repeat(MAX_AUTHENTICATED_REQUEST_LINE_BYTES + 128)}`);
         }
       }
     });
